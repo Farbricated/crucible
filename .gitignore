@@ -1,0 +1,8 @@
+.env
+__pycache__/
+*.pyc
+data/episode_logs/
+data/grpo_checkpoints/
+data/executor_phase2/
+*.egg-info/
+.DS_Store
