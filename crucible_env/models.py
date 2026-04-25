@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from openenv.core.models import Action, Observation, State
+try:
+    from openenv.core.models import Action, Observation, State
+except ImportError:
+    from openenv.core.env_server.types import Action, Observation, State
 
 
 @dataclass

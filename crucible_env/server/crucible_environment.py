@@ -4,22 +4,39 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime
 
-from openenv.core.environment import Environment
+try:
+    from openenv.core.environment import Environment
+except ImportError:
+    from openenv.core.env_server.interfaces import Environment
 
 sys.path.append("..")
 
-from agents.arbiter import (  # noqa: E402
-    compute_final_reward,
-    generate_feedback_prompt,
-    get_weakest_axis,
-    score as arbiter_score,
-)
-from agents.architect import generate as architect_generate  # noqa: E402
-from agents.executor import act as executor_act  # noqa: E402
-from core.schemas import ExecutorAction, FailureRecord, TaskSpec  # noqa: E402
-from core.world_state import WorldStateManager  # noqa: E402
-from domains.procurement.tasks import get_static_task  # noqa: E402
-from models import CrucibleAction, CrucibleObservation, CrucibleState
+try:
+    from agents.arbiter import (  # noqa: E402
+        compute_final_reward,
+        generate_feedback_prompt,
+        get_weakest_axis,
+        score as arbiter_score,
+    )
+    from agents.architect import generate as architect_generate  # noqa: E402
+    from agents.executor import act as executor_act  # noqa: E402
+    from core.schemas import ExecutorAction, FailureRecord, TaskSpec  # noqa: E402
+    from core.world_state import WorldStateManager  # noqa: E402
+    from domains.procurement.tasks import get_static_task  # noqa: E402
+    from models import CrucibleAction, CrucibleObservation, CrucibleState
+except ImportError:
+    from crucible_env.agents.arbiter import (  # noqa: E402
+        compute_final_reward,
+        generate_feedback_prompt,
+        get_weakest_axis,
+        score as arbiter_score,
+    )
+    from crucible_env.agents.architect import generate as architect_generate  # noqa: E402
+    from crucible_env.agents.executor import act as executor_act  # noqa: E402
+    from crucible_env.core.schemas import ExecutorAction, FailureRecord, TaskSpec  # noqa: E402
+    from crucible_env.core.world_state import WorldStateManager  # noqa: E402
+    from crucible_env.domains.procurement.tasks import get_static_task  # noqa: E402
+    from crucible_env.models import CrucibleAction, CrucibleObservation, CrucibleState
 
 
 class CrucibleEnvironment(Environment):

@@ -2,7 +2,10 @@ import json
 import re
 import uuid
 from anthropic import Anthropic
-from core.schemas import FailureRecord, ArchitectOutput, TaskSpec
+try:
+    from core.schemas import FailureRecord, ArchitectOutput, TaskSpec
+except ImportError:
+    from crucible_env.core.schemas import FailureRecord, ArchitectOutput, TaskSpec
 
 client = Anthropic()
 

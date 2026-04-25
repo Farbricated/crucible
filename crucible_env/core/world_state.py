@@ -1,5 +1,8 @@
 import copy
-from core.schemas import WorldState
+try:
+    from core.schemas import WorldState
+except ImportError:
+    from crucible_env.core.schemas import WorldState
 
 
 class WorldStateManager:

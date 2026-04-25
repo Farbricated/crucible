@@ -2,7 +2,10 @@ import os
 import json
 import re
 from anthropic import Anthropic
-from core.schemas import ExecutorAction, ArbiterScore, TaskSpec
+try:
+    from core.schemas import ExecutorAction, ArbiterScore, TaskSpec
+except ImportError:
+    from crucible_env.core.schemas import ExecutorAction, ArbiterScore, TaskSpec
 
 client = Anthropic()
 
