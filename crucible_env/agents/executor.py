@@ -66,14 +66,26 @@ def act(
 
     try:
         data = json.loads(raw)
+        violations = data.get("violations_found", [])
+        evidence = data.get("supporting_evidence", [])
+        if not isinstance(violations, list):
+            violations = []
+        if not isinstance(evidence, list):
+            evidence = []
+        confidence = data.get("confidence", 0.5)
+        try:
+            confidence = float(confidence)
+        except (TypeError, ValueError):
+            confidence = 0.5
+        confidence = max(0.0, min(1.0, confidence))
         return ExecutorAction(
             task_id=task.task_id,
             attempt_number=attempt_number,
             decision=data.get("decision", "NON-COMPLIANT"),
             reasoning=data.get("reasoning", ""),
-            violations_found=data.get("violations_found", []),
-            supporting_evidence=data.get("supporting_evidence", []),
-            confidence=float(data.get("confidence", 0.5)),
+            violations_found=violations,
+            supporting_evidence=evidence,
+            confidence=confidence,
             recommendation=data.get("recommendation"),
         )
     except Exception:
