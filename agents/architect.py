@@ -5,6 +5,7 @@ from anthropic import Anthropic
 from core.schemas import FailureRecord, ArchitectOutput, TaskSpec
 
 client = Anthropic()
+ALLOWED_DIFFICULTIES = {"easy", "medium", "hard", "expert"}
 
 ARCHITECT_SYSTEM_PROMPT = """You are the Architect for CRUCIBLE — a curriculum designer whose only job is to generate the next training task for the Executor.
 
@@ -83,6 +84,65 @@ def _adjust_difficulty(last_3_scores: list[float], current_difficulty: str) -> s
     return current_difficulty
 
 
+def _fallback_task_data(adjusted_difficulty: str, weakest_axis: str, lineage_id: str) -> dict:
+    return {
+        "domain": "procurement",
+        "difficulty": adjusted_difficulty,
+        "target_axis": weakest_axis,
+        "scenario_context": "Review this contract modification for FAR compliance violations. Identify all issues.",
+        "contract_text": "CONTRACT MOD — AXIOM-FALLBACK\nValue: $2.1M\nSAM.gov: Current\nSmall business goal: 20% committed, 9% actual\nFAR 52.203-13: Missing\nProgress payments: 85% (standard is 80%, no justification)",
+        "expected_score_range": [0.45, 0.70],
+        "architect_reasoning": f"Fallback task generated. Targeting {weakest_axis}.",
+        "lineage_id": lineage_id,
+    }
+
+
+def _normalize_architect_output(raw_data: dict, adjusted_difficulty: str, weakest_axis: str, lineage_id: str) -> dict:
+    data = dict(raw_data) if isinstance(raw_data, dict) else {}
+
+    difficulty = str(data.get("difficulty", adjusted_difficulty)).lower()
+    if difficulty not in ALLOWED_DIFFICULTIES:
+        difficulty = adjusted_difficulty
+
+    target_axis = str(data.get("target_axis", weakest_axis) or weakest_axis)
+    scenario_context = str(data.get("scenario_context", "")).strip()
+    contract_text = str(data.get("contract_text", "")).strip()
+    reasoning = str(data.get("architect_reasoning", "")).strip()
+    domain = str(data.get("domain", "procurement") or "procurement")
+    lineage = str(data.get("lineage_id", lineage_id) or lineage_id)
+
+    score_range = data.get("expected_score_range", [0.45, 0.70])
+    if not isinstance(score_range, (list, tuple)) or len(score_range) != 2:
+        score_range = [0.45, 0.70]
+    try:
+        lo = float(score_range[0])
+        hi = float(score_range[1])
+        if lo > hi:
+            lo, hi = hi, lo
+        score_range = [max(0.0, min(1.0, lo)), max(0.0, min(1.0, hi))]
+    except (TypeError, ValueError):
+        score_range = [0.45, 0.70]
+
+    if not scenario_context or not contract_text or not reasoning:
+        fallback = _fallback_task_data(adjusted_difficulty, weakest_axis, lineage_id)
+        fallback["architect_reasoning"] = (
+            "Fallback used due to incomplete Architect JSON fields. "
+            f"Targeting {weakest_axis}."
+        )
+        return fallback
+
+    return {
+        "domain": domain,
+        "difficulty": difficulty,
+        "target_axis": target_axis,
+        "scenario_context": scenario_context,
+        "contract_text": contract_text,
+        "expected_score_range": score_range,
+        "architect_reasoning": reasoning,
+        "lineage_id": lineage,
+    }
+
+
 def generate(
     failures: list[FailureRecord],
     last_3_scores: list[float],
@@ -126,7 +186,7 @@ Generate the next procurement task targeting the weakest axis.
 Target score band: 0.45–0.70.
 Lineage ID to reference: {lineage_id}
 
-Return JSON only."""
+Return strict JSON only. No prose. All required fields must be present."""
 
     response = client.messages.create(
         model="claude-sonnet-4-20250514",
@@ -139,19 +199,10 @@ Return JSON only."""
     raw = re.sub(r"```json|```", "", raw).strip()
 
     try:
-        data = json.loads(raw)
+        parsed = json.loads(raw)
     except json.JSONDecodeError:
-        # Fallback — generate a medium hard task
-        data = {
-            "domain": "procurement",
-            "difficulty": adjusted_difficulty,
-            "target_axis": weakest_axis,
-            "scenario_context": "Review this contract modification for FAR compliance violations. Identify all issues.",
-            "contract_text": "CONTRACT MOD — AXIOM-FALLBACK\nValue: $2.1M\nSAM.gov: Current\nSmall business goal: 20% committed, 9% actual\nFAR 52.203-13: Missing\nProgress payments: 85% (standard is 80%, no justification)",
-            "expected_score_range": [0.45, 0.70],
-            "architect_reasoning": f"Fallback task generated. Targeting {weakest_axis}.",
-            "lineage_id": lineage_id
-        }
+        parsed = _fallback_task_data(adjusted_difficulty, weakest_axis, lineage_id)
+    data = _normalize_architect_output(parsed, adjusted_difficulty, weakest_axis, lineage_id)
 
     task_id = f"arch-{uuid.uuid4().hex[:8]}"
 

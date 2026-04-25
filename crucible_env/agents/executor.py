@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 from anthropic import Anthropic
 try:
     from core.schemas import TaskSpec, ExecutorAction
@@ -8,6 +9,7 @@ except ImportError:
     from crucible_env.core.schemas import TaskSpec, ExecutorAction
 
 client = Anthropic()
+MAX_RETRIES = 3
 
 EXECUTOR_SYSTEM_PROMPT = """You are the Executor for CRUCIBLE — an AI agent working as a compliance analyst at AXIOM Corporation, an aerospace and defense contractor.
 
@@ -54,12 +56,34 @@ def act(
         prompt += f"ARBITER FEEDBACK:\n{feedback}\n\n"
     prompt += "Provide your analysis in the required JSON format."
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=EXECUTOR_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    response = None
+    last_error = None
+    for call_attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1000,
+                system=EXECUTOR_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            break
+        except Exception as exc:
+            last_error = exc
+            if call_attempt == MAX_RETRIES:
+                break
+            time.sleep(0.8 * (2 ** (call_attempt - 1)))
+
+    if response is None:
+        return ExecutorAction(
+            task_id=task.task_id,
+            attempt_number=attempt_number,
+            decision="PARSE_ERROR",
+            reasoning=f"Executor API call failed after retries: {type(last_error).__name__}",
+            confidence=0.0,
+            violations_found=[],
+            supporting_evidence=[],
+            recommendation=None,
+        )
 
     raw = response.content[0].text.strip()
     raw = re.sub(r"```json|```", "", raw).strip()

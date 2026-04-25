@@ -11,7 +11,6 @@ Shows:
 
 import json
 import os
-import time
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -30,10 +29,23 @@ st.set_page_config(
 st.title("🔥 CRUCIBLE — Live Training Dashboard")
 st.caption("Self-Improving RL Environment | AXIOM Corporation | OpenEnv Hackathon 2026")
 
-# ── Auto-refresh ─────────────────────────────────────────────
-refresh = st.sidebar.checkbox("Auto-refresh (5s)", value=True)
+# ── Refresh controls ─────────────────────────────────────────
+refresh = st.sidebar.checkbox("Auto-refresh", value=False)
+refresh_interval = st.sidebar.slider("Refresh interval (sec)", 3, 30, 5)
 if refresh:
-    time.sleep(5)
+    # Keep rerun cadence explicit to avoid continuous fast full-script loops.
+    st.sidebar.caption(f"Auto-refresh enabled every {refresh_interval}s.")
+    st.markdown(
+        f"""
+        <script>
+            setTimeout(function() {{
+                window.location.reload();
+            }}, {refresh_interval * 1000});
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+if st.sidebar.button("Refresh now"):
     st.rerun()
 
 # ── Load data ─────────────────────────────────────────────────

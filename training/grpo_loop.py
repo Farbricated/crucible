@@ -116,12 +116,12 @@ def run_phase2_grpo(n_episodes: int = 50, model_name: str = "unsloth/Qwen2.5-7B-
     prompts = [build_prompt(t) for t in static_tasks * (n_episodes // len(static_tasks) + 1)]
     prompts = prompts[:n_episodes]
 
-    # Reward function for GRPO — calls Arbiter
-    runner = EpisodeRunner(seed=42, use_architect=False)
+    # Reward function for GRPO — calls Arbiter with stateful task rotation.
+    reward_state = {"idx": 0}
 
     def reward_fn(completions, prompts=None, **kwargs):
         """GRPO reward function — scores each completion via Arbiter."""
-        from core.schemas import ExecutorAction, TaskSpec
+        from core.schemas import ExecutorAction
         from agents.arbiter import score as arbiter_score
         import json, re
 
@@ -139,8 +139,9 @@ def run_phase2_grpo(n_episodes: int = 50, model_name: str = "unsloth/Qwen2.5-7B-
                     supporting_evidence=data.get("supporting_evidence", []),
                     confidence=float(data.get("confidence", 0.0))
                 )
-                # Use a medium difficulty task as scoring reference
-                ref_task = static_tasks[0]
+                # Rotate reference tasks so reward signal is not tied to one sample.
+                ref_task = static_tasks[reward_state["idx"] % len(static_tasks)]
+                reward_state["idx"] += 1
                 s = arbiter_score(action, ref_task)
                 rewards.append(s.weighted_total)
             except Exception:
