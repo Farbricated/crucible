@@ -1,3 +1,22 @@
+---
+title: Crucible Env
+emoji: 🔥
+colorFrom: red
+colorTo: yellow
+sdk: docker
+app_port: 8000
+pinned: true
+license: mit
+tags:
+  - openenv
+  - reinforcement-learning
+  - multi-agent
+  - self-improvement
+  - adversarial
+  - procurement
+short_description: Self-improving multi-agent RL env for procurement
+---
+
 # 🔥 CRUCIBLE — Self-Improving RL Environment
 
 > *"Fixed environments have ceilings. CRUCIBLE doesn't — because the hardest problem you face tomorrow is built from your failures today."*
@@ -8,8 +27,8 @@
 
 ## 🚀 Live Environment
 
-**HF Space:** https://YOUR_USERNAME-crucible-env.hf.space  
-**Health check:** https://YOUR_USERNAME-crucible-env.hf.space/health
+**HF Space:** https://Flake56-crucible-env.hf.space  
+**Health check:** https://Flake56-crucible-env.hf.space/health
 
 ## 📺 Demo Video
 [Watch the 2-minute demo](YOUR_YOUTUBE_LINK)
@@ -61,12 +80,12 @@ The Architect's only job: keep the Executor in this band forever.
 ## Quick Start
 
 ```python
-pip install git+https://huggingface.co/spaces/YOUR_USERNAME/crucible-env
+pip install git+https://huggingface.co/spaces/Flake56/crucible-env
 
 from crucible_env.client import CrucibleEnv
 from crucible_env.models import CrucibleAction
 
-with CrucibleEnv(base_url="https://YOUR_USERNAME-crucible-env.hf.space").sync() as env:
+with CrucibleEnv(base_url="https://Flake56-crucible-env.hf.space").sync() as env:
     obs = env.reset()
     action = CrucibleAction(
         decision="NON-COMPLIANT",

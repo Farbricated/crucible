@@ -11,12 +11,14 @@ Set environment variables:
   HF_TOKEN=hf_xxx            → uses HuggingFace serverless inference
   ANTHROPIC_API_KEY=sk-xxx   → fallback if others unavailable
   LLM_BACKEND=groq|hf|anthropic|auto
+  GROQ_TPM_LIMIT=6000        → tokens-per-minute cap (default 6000)
 """
 
 import os
-import json
 import re
 import time
+import threading
+from collections import deque
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 
@@ -40,7 +42,8 @@ HF_MODEL = os.getenv(
 # Anthropic model (fallback)
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
-MAX_RETRIES = 3
+MAX_RETRIES = 6          # higher ceiling — rate-limit retries are cheap
+GROQ_MAX_RETRIES = 6    # Groq-specific: 429 retries on top of backend fallbacks
 _hf_client = None
 _anthropic_client = None
 _groq_client = None
@@ -49,15 +52,92 @@ _groq_client = None
 # Live call-counter (visible on dashboard)
 # ─────────────────────────────────────────────────────────────
 _call_stats: dict = {
-    "groq":      {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    "hf":        {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    "anthropic": {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    "groq":      {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0,
+                  "total_tokens": 0, "rate_limit_waits": 0, "wait_seconds": 0.0},
+    "hf":        {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                  "rate_limit_waits": 0, "wait_seconds": 0.0},
+    "anthropic": {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                  "rate_limit_waits": 0, "wait_seconds": 0.0},
 }
 
 
 def get_call_stats() -> dict:
     """Return a copy of the per-backend call statistics."""
     return {k: dict(v) for k, v in _call_stats.items()}
+
+
+# ─────────────────────────────────────────────────────────────
+# Token-aware sliding-window rate limiter for Groq
+# ─────────────────────────────────────────────────────────────
+_GROQ_TPM_LIMIT = int(os.getenv("GROQ_TPM_LIMIT", "6000"))
+# Use 85% of the limit as a safety margin — stops us from ever touching 6000
+_GROQ_TPM_EFFECTIVE = int(_GROQ_TPM_LIMIT * 0.85)   # 5100 tokens/min default
+
+
+class _SlidingWindowRateLimiter:
+    """
+    Sliding 60-second window rate limiter.
+    Tracks actual tokens consumed and pre-emptively sleeps when the
+    budget for the next request would overflow the effective limit.
+    """
+
+    def __init__(self, tpm_effective: int):
+        self.tpm_effective = tpm_effective
+        self._window: deque = deque()   # (monotonic_timestamp, tokens)
+        self._lock = threading.Lock()
+
+    def _purge(self):
+        cutoff = time.monotonic() - 60.0
+        while self._window and self._window[0][0] < cutoff:
+            self._window.popleft()
+
+    def _used(self) -> int:
+        self._purge()
+        return sum(t for _, t in self._window)
+
+    def acquire(self, estimated_tokens: int):
+        """Block until the window has room for estimated_tokens."""
+        with self._lock:
+            while True:
+                used = self._used()
+                if used + estimated_tokens <= self.tpm_effective:
+                    break
+                # Wait until the oldest entry slides out of the 60s window
+                wait = (self._window[0][0] + 60.0) - time.monotonic() + 0.2
+                if wait > 0:
+                    print(
+                        f"[RateLimiter] TPM budget {used}/{self.tpm_effective} — "
+                        f"pre-emptive sleep {wait:.1f}s"
+                    )
+                    _call_stats["groq"]["rate_limit_waits"] += 1
+                    _call_stats["groq"]["wait_seconds"]     += wait
+                    time.sleep(wait)
+
+    def record(self, tokens: int):
+        with self._lock:
+            self._window.append((time.monotonic(), tokens))
+
+
+_groq_limiter = _SlidingWindowRateLimiter(_GROQ_TPM_EFFECTIVE)
+
+
+# ─────────────────────────────────────────────────────────────
+# 429 retry-after parser
+# ─────────────────────────────────────────────────────────────
+def _parse_groq_retry_after(error_msg: str) -> float:
+    """
+    Extract the suggested wait time from a Groq rate-limit error message.
+    Format: '... Please try again in 12.345s.'
+    Falls back to 10s if not parseable.
+    """
+    match = re.search(r"[Pp]lease try again in ([\d.]+)s", error_msg)
+    if match:
+        return float(match.group(1)) + 0.5   # small safety buffer
+    # Secondary pattern: 'in Xm Ys'
+    match2 = re.search(r"in (\d+)m([\d.]+)s", error_msg)
+    if match2:
+        return int(match2.group(1)) * 60 + float(match2.group(2)) + 0.5
+    return 10.0   # conservative fallback
 
 
 def _get_hf_client():
@@ -115,34 +195,35 @@ def complete(
 ) -> str:
     """
     Call the active LLM backend and return the raw text response.
-    Falls back to Anthropic if HF fails.
+    Groq handles its own retries + rate limiting internally.
+    HF and Anthropic fall back to each other on failure.
     """
     backend = _backend()
-    last_error = None
 
+    if backend == "groq":
+        # _complete_groq manages its own retry/rate-limit loop
+        try:
+            return _complete_groq(system_prompt, user_prompt, max_tokens, temperature)
+        except Exception as exc:
+            # Final fallback chain if Groq exhausts all retries
+            if HF_TOKEN:
+                try:
+                    return _complete_hf(system_prompt, user_prompt, max_tokens, temperature)
+                except Exception:
+                    pass
+            if ANTHROPIC_API_KEY:
+                return _complete_anthropic(system_prompt, user_prompt, max_tokens)
+            raise
+
+    # ── HF / Anthropic path (simple retry) ──────────────────
+    last_error = None
     for attempt in range(1, MAX_RETRIES + 1):
         try:
-            if backend == "groq":
-                return _complete_groq(system_prompt, user_prompt, max_tokens, temperature)
             if backend == "hf":
                 return _complete_hf(system_prompt, user_prompt, max_tokens, temperature)
-            else:
-                return _complete_anthropic(system_prompt, user_prompt, max_tokens)
+            return _complete_anthropic(system_prompt, user_prompt, max_tokens)
         except Exception as exc:
             last_error = exc
-            # On Groq failure, try HF then Anthropic once
-            if backend == "groq" and attempt == 1:
-                if HF_TOKEN:
-                    try:
-                        return _complete_hf(system_prompt, user_prompt, max_tokens, temperature)
-                    except Exception:
-                        pass
-                if ANTHROPIC_API_KEY:
-                    try:
-                        return _complete_anthropic(system_prompt, user_prompt, max_tokens)
-                    except Exception:
-                        pass
-            # On HF failure, try Anthropic once
             if backend == "hf" and ANTHROPIC_API_KEY and attempt == 1:
                 try:
                     return _complete_anthropic(system_prompt, user_prompt, max_tokens)
@@ -179,6 +260,15 @@ def _complete_hf(
     return response.choices[0].message.content.strip()
 
 
+def _estimate_tokens(system_prompt: str, user_prompt: str, max_tokens: int) -> int:
+    """
+    Rough token estimate before the call so the rate limiter can pre-check budget.
+    Rule of thumb: 1 token ≈ 4 chars.  Add max_tokens for worst-case output.
+    """
+    input_chars = len(system_prompt) + len(user_prompt)
+    return (input_chars // 4) + max_tokens
+
+
 def _complete_groq(
     system_prompt: str,
     user_prompt: str,
@@ -188,25 +278,59 @@ def _complete_groq(
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY is not set")
 
+    # ── Pre-flight: wait if sliding window is too full ───────
+    estimated = _estimate_tokens(system_prompt, user_prompt, max_tokens)
+    _groq_limiter.acquire(estimated)
+
     client = _get_groq_client()
-    resp = client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        max_tokens=max_tokens,
-        temperature=temperature,
-    )
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
 
-    # Track usage
-    _call_stats["groq"]["calls"] += 1
-    if resp.usage:
-        _call_stats["groq"]["prompt_tokens"]     += resp.usage.prompt_tokens or 0
-        _call_stats["groq"]["completion_tokens"] += resp.usage.completion_tokens or 0
-        _call_stats["groq"]["total_tokens"]      += resp.usage.total_tokens or 0
+    for attempt in range(1, GROQ_MAX_RETRIES + 1):
+        try:
+            resp = client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
 
-    return resp.choices[0].message.content.strip()
+            # Record actual tokens in the sliding window
+            actual_tokens = resp.usage.total_tokens if resp.usage else estimated
+            _groq_limiter.record(actual_tokens)
+
+            # Update global stats
+            _call_stats["groq"]["calls"] += 1
+            if resp.usage:
+                _call_stats["groq"]["prompt_tokens"]     += resp.usage.prompt_tokens or 0
+                _call_stats["groq"]["completion_tokens"] += resp.usage.completion_tokens or 0
+                _call_stats["groq"]["total_tokens"]      += resp.usage.total_tokens or 0
+
+            return resp.choices[0].message.content.strip()
+
+        except Exception as exc:
+            err_str = str(exc)
+            is_rate_limit = "429" in err_str or "rate_limit" in err_str.lower()
+
+            if is_rate_limit:
+                wait = _parse_groq_retry_after(err_str)
+                _call_stats["groq"]["rate_limit_waits"] += 1
+                _call_stats["groq"]["wait_seconds"]     += wait
+                print(
+                    f"[Groq 429] Rate limited (attempt {attempt}/{GROQ_MAX_RETRIES}). "
+                    f"Waiting {wait:.1f}s as instructed..."
+                )
+                time.sleep(wait)
+            else:
+                # Non-rate-limit error: exponential backoff
+                if attempt >= GROQ_MAX_RETRIES:
+                    raise
+                backoff = 0.8 * (2 ** (attempt - 1))
+                time.sleep(backoff)
+
+    raise RuntimeError(f"Groq call failed after {GROQ_MAX_RETRIES} attempts")
 
 
 def _complete_anthropic(
@@ -249,6 +373,9 @@ def backend_info() -> dict:
         "backend": _backend(),
         "groq_model": GROQ_MODEL,
         "groq_key_set": bool(GROQ_API_KEY),
+        "groq_tpm_limit": _GROQ_TPM_LIMIT,
+        "groq_tpm_effective": _GROQ_TPM_EFFECTIVE,
+        "groq_window_used": _groq_limiter._used(),
         "hf_model": HF_MODEL,
         "hf_token_set": bool(HF_TOKEN),
         "anthropic_key_set": bool(ANTHROPIC_API_KEY),

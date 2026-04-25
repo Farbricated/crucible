@@ -1,7 +1,9 @@
 # Core
+openenv-core==0.2.3        # hackathon-pinned version
 pydantic>=2.0.0
 huggingface_hub>=1.0.0
 anthropic>=0.40.0          # fallback if HF_TOKEN not set
+groq>=0.11.0               # primary LLM backend
 
 # Dashboard
 streamlit>=1.35.0
