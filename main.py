@@ -2,17 +2,23 @@
 CRUCIBLE — Main Entry Point
 
 Commands:
-  python main.py baseline     — Phase 1: measure base model performance
-  python main.py train        — Phase 2: run 50 episodes, no Architect
-  python main.py architect    — Phase 3: activate Architect, 30 episodes
-  python main.py demo         — Run demo mode with failure injection
-  python main.py episode      — Run a single episode (quick test)
-  python main.py regression   — Check for catastrophic forgetting
-  python main.py dashboard    — Launch Streamlit dashboard
+  python main.py baseline      — Phase 1: measure base model performance on static tasks
+  python main.py train         — Phase 2: run 50 episodes with Unsloth/TRL GRPO (or simulation)
+  python main.py architect     — Phase 3: activate Architect curriculum, 30 episodes
+  python main.py adversarial   — Run adversarial red-team episode (Vendor vs Executor)
+  python main.py shock         — Run episode with regulation shock events enabled
+  python main.py eu            — Run episode on EU Procurement domain (Directive 2014/24/EU)
+  python main.py full          — Run complete pipeline: baseline + train + architect + adversarial
+  python main.py demo          — Run demo mode with failure injection
+  python main.py episode       — Run a single standard episode (quick test)
+  python main.py regression    — Check for catastrophic forgetting vs baseline
+  python main.py plots         — Generate all plots and demo data
+  python main.py dashboard     — Launch Streamlit dashboard
 """
 
 import sys
 import subprocess
+import json
 
 
 def run_baseline():
@@ -21,13 +27,88 @@ def run_baseline():
 
 
 def run_train():
-    from training.grpo_loop import _simulate_phase2
-    _simulate_phase2(n_episodes=50)
+    from training.grpo_loop import run_phase2_grpo
+    run_phase2_grpo(n_episodes=50)
 
 
 def run_architect():
     from training.grpo_loop import run_phase3_architect
     run_phase3_architect(n_episodes=30)
+
+
+def run_adversarial():
+    """Run an adversarial episode: Vendor crafts, Executor must catch hidden violations."""
+    from core.episode_runner import EpisodeRunner
+    from domains.procurement.tasks import get_static_task
+
+    print("\n=== CRUCIBLE ADVERSARIAL MODE ===")
+    print("Vendor will craft a contract with hidden violations.")
+    print("Executor must detect them. Vendor reward = 1 - executor.correctness\n")
+
+    runner = EpisodeRunner(seed=42, use_adversarial=True, use_shocks=False)
+    task = get_static_task("medium", 0)
+    summary = runner.run_episode(task)
+    print("\nAdversarial episode summary:")
+    print(json.dumps(summary, indent=2, default=str))
+    if runner.vendor_rewards:
+        print(f"\nVendor reward: {runner.vendor_rewards[-1]:.3f}")
+        print(f"(0.0 = Executor caught everything | 1.0 = Vendor concealed everything)")
+
+
+def run_shock():
+    """Run an episode with regulation shock events enabled."""
+    from core.episode_runner import EpisodeRunner
+    from domains.procurement.tasks import get_static_task
+
+    print("\n=== CRUCIBLE REGULATION SHOCK MODE ===")
+    print("Mid-episode regulatory changes will be injected.")
+    print("Executor must adapt its analysis to new requirements.\n")
+
+    runner = EpisodeRunner(seed=42, use_shocks=True, shock_probability=1.0)
+    task = get_static_task("medium", 1)
+    summary = runner.run_episode(task)
+    print("\nShock episode summary:")
+    print(json.dumps(summary, indent=2, default=str))
+
+
+def run_eu():
+    """Run an episode on the EU Procurement domain."""
+    from core.episode_runner import EpisodeRunner
+    from domains.eu_procurement.tasks import get_eu_task
+
+    print("\n=== CRUCIBLE EU PROCUREMENT MODE ===")
+    print("Testing Executor on EU Directive 2014/24/EU — cross-jurisdiction generalization.\n")
+
+    runner = EpisodeRunner(seed=42, jurisdiction="EU")
+    task = get_eu_task("medium", 0)
+    summary = runner.run_episode(task)
+    print("\nEU episode summary:")
+    print(json.dumps(summary, indent=2, default=str))
+
+
+def run_full_pipeline():
+    """Run the complete CRUCIBLE pipeline end-to-end."""
+    print("\n=== CRUCIBLE FULL PIPELINE ===")
+    print("Phase 1: Baseline → Phase 2: Train → Phase 3: Architect → Adversarial + Shock\n")
+
+    from training.grpo_loop import run_phase1_baseline, run_phase2_grpo, run_phase3_architect
+    run_phase1_baseline()
+    run_phase2_grpo(n_episodes=20)
+    run_phase3_architect(n_episodes=10)
+
+    print("\n[Pipeline] Running adversarial red-team episode...")
+    run_adversarial()
+
+    print("\n[Pipeline] Running regulation shock episode...")
+    run_shock()
+
+    print("\n[Pipeline] Running EU jurisdiction episode...")
+    run_eu()
+
+    print("\n[Pipeline] Generating plots...")
+    run_plots()
+
+    print("\n=== FULL PIPELINE COMPLETE ===")
 
 
 def run_demo():
@@ -41,7 +122,6 @@ def run_single_episode():
     from core.episode_runner import EpisodeRunner
     runner = EpisodeRunner(seed=42, use_architect=False)
     summary = runner.run_episode()
-    import json
     print("\nEpisode summary:")
     print(json.dumps(summary, indent=2, default=str))
 
@@ -49,6 +129,13 @@ def run_single_episode():
 def run_regression():
     from eval.regression_checker import check_regression
     check_regression()
+
+
+def run_plots():
+    """Generate all plots and demo data. Commits-ready output under plots/."""
+    from scripts.generate_demo_data import main as gen_main
+    gen_main()
+    print("Plots saved to plots/ directory.")
 
 
 def run_dashboard():
@@ -60,9 +147,14 @@ def main():
         "baseline": run_baseline,
         "train": run_train,
         "architect": run_architect,
+        "adversarial": run_adversarial,
+        "shock": run_shock,
+        "eu": run_eu,
+        "full": run_full_pipeline,
         "demo": run_demo,
         "episode": run_single_episode,
         "regression": run_regression,
+        "plots": run_plots,
         "dashboard": run_dashboard,
     }
 
@@ -72,7 +164,7 @@ def main():
         print(__doc__)
         sys.exit(1)
 
-    print(f"\n🔥 CRUCIBLE | Running: {cmd}\n")
+    print(f"\nCRUCIBLE | Running: {cmd}\n")
     commands[cmd]()
 
 

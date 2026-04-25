@@ -2,6 +2,7 @@
 GRPO Training Loop for CRUCIBLE Executor
 Uses: Unsloth + HF TRL GRPOTrainer
 Model: Qwen2.5-7B-Instruct (or smaller for testing)
+Tracking: Weights & Biases (wandb) — real training curves
 
 Run phases:
   Phase 1 — baseline measurement (no training)
@@ -14,6 +15,51 @@ import os
 import sys
 from core.episode_runner import EpisodeRunner
 from domains.procurement.tasks import get_all_static_tasks
+from utils.llm_client import backend_info, active_backend
+
+# ── W&B setup ─────────────────────────────────────────────────
+_wandb_available = False
+_wandb_run = None
+
+def _init_wandb(project: str = "crucible-openenv", name: str = None):
+    global _wandb_available, _wandb_run
+    try:
+        import wandb
+        _wandb_run = wandb.init(
+            project=project,
+            name=name,
+            config={
+                **backend_info(),
+                "environment": "CRUCIBLE",
+                "domain": "procurement + eu_procurement",
+                "agents": ["executor", "arbiter", "architect", "vendor"],
+                "features": ["adversarial", "regulation_shocks", "multi_jurisdiction", "counterfactual"],
+            },
+            reinit=True,
+        )
+        _wandb_available = True
+        print(f"W&B run: {_wandb_run.url}")
+    except Exception as e:
+        print(f"W&B not available ({e}). Continuing without tracking.")
+        _wandb_available = False
+
+
+def _log_wandb(metrics: dict, step: int = None):
+    if _wandb_available and _wandb_run:
+        try:
+            import wandb
+            wandb.log(metrics, step=step)
+        except Exception:
+            pass
+
+
+def _finish_wandb():
+    if _wandb_available and _wandb_run:
+        try:
+            import wandb
+            wandb.finish()
+        except Exception:
+            pass
 
 LOG_DIR = "data/episode_logs"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -24,34 +70,59 @@ os.makedirs(LOG_DIR, exist_ok=True)
 # ─────────────────────────────────────────────────────────────
 
 def run_phase1_baseline():
-    """Run all 20 static tasks. Store baseline scores. No training."""
+    """Run all static tasks. Store baseline scores. No training."""
     print("\n" + "="*60)
     print("PHASE 1 — BASELINE MEASUREMENT")
+    print(f"LLM Backend: {active_backend()}")
     print("="*60)
+
+    _init_wandb(name="phase1-baseline")
 
     runner = EpisodeRunner(seed=42, use_architect=False)
     static_tasks = get_all_static_tasks()
 
+    # Also include EU tasks for cross-jurisdiction baseline
+    try:
+        from domains.eu_procurement.tasks import get_all_eu_tasks
+        eu_tasks = get_all_eu_tasks()[:3]  # 3 EU tasks in baseline
+    except Exception:
+        eu_tasks = []
+
+    all_tasks = static_tasks + eu_tasks
     baselines = []
-    for task in static_tasks:
+
+    for i, task in enumerate(all_tasks):
         summary = runner.run_episode(task=task)
-        baselines.append({
+        record = {
             "task_id": task.task_id,
+            "domain": task.domain,
             "difficulty": task.difficulty,
             "score_1": summary["score_1"],
             "score_2": summary["score_2"],
             "final_reward": summary["final_reward"],
             "weakest_axis": summary["weakest_axis"],
-        })
+            "llm_backend": active_backend(),
+        }
+        baselines.append(record)
         print(f"  Baseline | {task.task_id} | {task.difficulty} | reward: {summary['final_reward']:.3f}")
+
+        _log_wandb({
+            "baseline/final_reward": summary["final_reward"],
+            "baseline/score_1": summary["score_1"],
+            "baseline/score_2": summary["score_2"],
+            "baseline/delta": summary["delta"],
+            "baseline/domain": task.domain,
+        }, step=i + 1)
 
     path = os.path.join(LOG_DIR, "baseline.json")
     with open(path, "w") as f:
         json.dump(baselines, f, indent=2)
 
-    print(f"\nBaseline saved to {path}")
     avg = sum(b["final_reward"] for b in baselines) / len(baselines)
+    print(f"\nBaseline saved to {path}")
     print(f"Average baseline reward: {avg:.3f}")
+    _log_wandb({"baseline/avg_reward": avg, "baseline/total_tasks": len(baselines)})
+    _finish_wandb()
     return baselines
 
 
@@ -177,19 +248,55 @@ def run_phase2_grpo(n_episodes: int = 50, model_name: str = "unsloth/Qwen2.5-7B-
 
 
 def _simulate_phase2(n_episodes: int = 50):
-    """Simulation mode — runs episodes via Anthropic API without local model training."""
-    print("Running Phase 2 in SIMULATION MODE (Anthropic API as Executor)")
-    runner = EpisodeRunner(seed=42, use_architect=False)
+    """
+    Simulation mode — runs episodes via HF Inference API / Anthropic (no local GPU needed).
+    Includes adversarial vendor episodes and regulation shock events every 5th episode.
+    """
+    print(f"Running Phase 2 in SIMULATION MODE (LLM: {active_backend()})")
+    print("Adversarial vendor and regulation shocks enabled for diversity.")
+    _init_wandb(name="phase2-simulation")
+
+    runner = EpisodeRunner(
+        seed=42,
+        use_architect=False,
+        use_adversarial=False,  # Enable after phase 1 baseline
+        use_shocks=True,
+        shock_probability=0.25,
+    )
 
     for i in range(n_episodes):
+        # Every 5th episode, run adversarial mode to build red-team signal
+        if (i + 1) % 5 == 0 and i > 0:
+            adv_runner = EpisodeRunner(seed=i, use_adversarial=True, use_shocks=False)
+            adv_runner.run_episode()
+            runner.vendor_rewards.extend(adv_runner.vendor_rewards)
+
         summary = runner.run_episode()
+        # Log every episode to W&B
+        _log_wandb({
+            "train/final_reward": summary["final_reward"],
+            "train/score_1": summary["score_1"],
+            "train/score_2": summary["score_2"],
+            "train/delta": summary["delta"],
+            "train/is_breakthrough": int(summary.get("is_breakthrough", False)),
+        }, step=i + 1)
+
         if (i + 1) % 10 == 0:
             metrics = runner.get_metrics_summary()
-            print(f"\n[Episode {i+1}] Avg reward: {metrics['avg_final_reward']:.3f}")
+            shock_eps = [r for r in runner.reward_history if r.get("shock_fired")]
+            shock_adapt = sum(1 for r in shock_eps if r.get("shock_adapted")) / max(1, len(shock_eps))
+            print(f"\n[Episode {i+1}] Avg reward: {metrics['avg_final_reward']:.3f} | Shock adapt: {shock_adapt:.0%}")
+            _log_wandb({
+                "train/avg_reward": metrics["avg_final_reward"],
+                "train/shock_adaptation_rate": shock_adapt,
+                "train/breakthroughs": metrics.get("breakthroughs", 0),
+            }, step=i + 1)
 
     runner.save_full_log()
     metrics = runner.get_metrics_summary()
     print(f"\nPhase 2 complete. Final metrics: {json.dumps(metrics, indent=2)}")
+    _log_wandb({"train/phase2_avg_reward": metrics["avg_final_reward"]})
+    _finish_wandb()
     return metrics
 
 
@@ -201,7 +308,9 @@ def run_phase3_architect(n_episodes: int = 30):
     """Run episodes with Architect generating tasks from failure history."""
     print("\n" + "="*60)
     print("PHASE 3 — ARCHITECT ACTIVATION")
+    print(f"LLM Backend: {active_backend()}")
     print("="*60)
+    _init_wandb(name="phase3-architect")
 
     # Load failure history from Phase 2 if available
     runner = EpisodeRunner(seed=42, use_architect=True)
@@ -219,14 +328,29 @@ def run_phase3_architect(n_episodes: int = 30):
         summary = runner.run_episode()
         if summary.get("architect_output"):
             print(f"  [Architect] {summary['architect_output']['architect_reasoning'][:100]}...")
+
+        _log_wandb({
+            "architect/final_reward": summary["final_reward"],
+            "architect/score_2": summary["score_2"],
+            "architect/in_band": int(0.45 <= summary["score_2"] <= 0.70),
+            "architect/is_breakthrough": int(summary.get("is_breakthrough", False)),
+        }, step=runner.episode_count)
+
         if (i + 1) % 10 == 0:
             metrics = runner.get_metrics_summary()
             print(f"\n[Episode {runner.episode_count}] Avg reward: {metrics['avg_final_reward']:.3f} | Calibration: {metrics['architect_calibration_accuracy']:.2%}")
+            _log_wandb({
+                "architect/avg_reward": metrics["avg_final_reward"],
+                "architect/calibration_accuracy": metrics["architect_calibration_accuracy"],
+                "architect/in_band_rate": metrics.get("in_band_rate", 0),
+            }, step=runner.episode_count)
 
     runner.save_full_log()
     metrics = runner.get_metrics_summary()
     print(f"\nPhase 3 complete.")
     print(json.dumps(metrics, indent=2))
+    _log_wandb({"architect/phase3_calibration": metrics["architect_calibration_accuracy"]})
+    _finish_wandb()
     return metrics
 
 

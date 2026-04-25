@@ -85,8 +85,10 @@ class ArbiterScore(BaseModel):
     feedback: str = ""
     what_failed: str = ""
     what_correct_looks_like: str = ""
+    consequence_if_approved: str = ""   # Counterfactual: what happens if wrong decision stands
     world_state_delta: dict = {}
     world_coherent: bool = True
+    shock_adapted: bool = False         # Did executor adapt to a RegulationShock?
 
 
 # ─────────────────────────────────────────────
@@ -128,6 +130,54 @@ class ArchitectOutput(BaseModel):
 # EPISODE LOG ENTRY
 # ─────────────────────────────────────────────
 
+# ─────────────────────────────────────────────
+# VENDOR ACTION (Adversarial Agent)
+# ─────────────────────────────────────────────
+
+class VendorAction(BaseModel):
+    task_id: str
+    crafted_contract: str
+    hidden_violations: list[str] = []
+    concealment_techniques: list[str] = []
+    concealment_reasoning: str = ""
+    difficulty_target: str = "medium"
+    jurisdiction: str = "FAR"
+
+
+# ─────────────────────────────────────────────
+# VENDOR SCORE (Adversarial Reward)
+# ─────────────────────────────────────────────
+
+class VendorScore(BaseModel):
+    task_id: str
+    violations_embedded: int = 0
+    violations_caught: int = 0
+    violations_missed: int = 0
+    concealment_rate: float = 0.0   # fraction the Executor missed
+    vendor_reward: float = 0.0      # inverse of executor correctness
+    executor_correctness: float = 0.0
+
+
+# ─────────────────────────────────────────────
+# REGULATION SHOCK (Mid-Episode Event)
+# ─────────────────────────────────────────────
+
+class RegulationShock(BaseModel):
+    shock_id: str
+    shock_type: str   # threshold_change | vendor_debarment | new_clause | sanctions_update
+    description: str
+    affected_clause: str
+    new_requirement: str
+    severity: str = "medium"   # low | medium | high | critical
+    jurisdiction: str = "FAR"
+    timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    world_delta: dict = {}
+
+
+# ─────────────────────────────────────────────
+# EPISODE LOG ENTRY
+# ─────────────────────────────────────────────
+
 class EpisodeLogEntry(BaseModel):
     episode_id: str
     step: int
@@ -138,4 +188,8 @@ class EpisodeLogEntry(BaseModel):
     score_2: ArbiterScore
     failure_record: FailureRecord
     architect_output: Optional[ArchitectOutput] = None
+    vendor_action: Optional[VendorAction] = None
+    vendor_score: Optional[VendorScore] = None
+    regulation_shock: Optional[RegulationShock] = None
+    jurisdiction: str = "FAR"
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())

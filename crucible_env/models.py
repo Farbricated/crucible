@@ -30,17 +30,22 @@ class CrucibleObservation(Observation):
     difficulty: str = "easy"
     target_axis: str = "correctness"
     attempt_number: int = 1
-    arbiter_feedback: str = ""  # filled after attempt 1
+    arbiter_feedback: str = ""
     score_attempt_1: float = 0.0
     score_attempt_2: float = 0.0
     final_reward: float = 0.0
     done: bool = False
     reward: float = 0.0
-    # Architect fields (shown after each episode)
+    # Architect fields
     architect_reasoning: str = ""
     next_task_difficulty: str = ""
     lineage_id: str = ""
     is_breakthrough: bool = False
+    # Counterfactual consequence
+    consequence_if_approved: str = ""
+    # Adversarial / shock fields
+    shock_fired: bool = False
+    shock_adapted: bool = False
 
 
 @dataclass

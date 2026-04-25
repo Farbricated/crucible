@@ -4,21 +4,37 @@ import os
 from datetime import datetime
 from core.schemas import (
     TaskSpec, ExecutorAction, ArbiterScore,
-    FailureRecord, EpisodeLogEntry, ArchitectOutput
+    FailureRecord, EpisodeLogEntry, ArchitectOutput,
+    VendorAction, VendorScore, RegulationShock,
 )
 from core.world_state import WorldStateManager
+from core.regulation_shock import RegulationShockEngine
 from agents import arbiter, executor, architect
+from agents import vendor as vendor_agent
 from domains.procurement.tasks import get_static_task, get_all_static_tasks
+from utils.diversity import DiversityTracker
+from utils.llm_client import active_backend, GROQ_MODEL, HF_MODEL, _backend
 
 LOG_DIR = "data/episode_logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
 
 class EpisodeRunner:
-    def __init__(self, seed: int = 42, use_architect: bool = False):
+    def __init__(
+        self,
+        seed: int = 42,
+        use_architect: bool = False,
+        use_adversarial: bool = False,
+        use_shocks: bool = False,
+        shock_probability: float = 0.30,
+        jurisdiction: str = "FAR",
+    ):
         self.seed = seed
         self.world = WorldStateManager(seed)
         self.use_architect = use_architect
+        self.use_adversarial = use_adversarial
+        self.use_shocks = use_shocks
+        self.jurisdiction = jurisdiction
         self.episode_count = 0
         self.all_failures: list[FailureRecord] = []
         self.episode_log: list[EpisodeLogEntry] = []
@@ -27,6 +43,10 @@ class EpisodeRunner:
         self.next_task: TaskSpec = None
         self.last_architect_output: ArchitectOutput = None
         self.architect_rewards: list[float] = []
+        self.shock_engine = RegulationShockEngine(shock_probability, jurisdiction)
+        self.vendor_rewards: list[float] = []
+        self.diversity_tracker = DiversityTracker()
+        self.diversity_scores: list[float] = []
 
         # Metrics for dashboard
         self.reward_history: list[dict] = []
@@ -53,22 +73,46 @@ class EpisodeRunner:
         world_snapshot_before = self.world.snapshot()
         world_text = self.world.render()
 
+        # ── ADVERSARIAL VENDOR (optional) ───────────────────────
+        vendor_action: VendorAction | None = None
+        if self.use_adversarial:
+            print(f"\n[Vendor] Crafting adversarial contract...")
+            vendor_action = vendor_agent.craft(task, self.jurisdiction, task.difficulty)
+            # Override task contract with vendor's adversarial version
+            task = task.model_copy(update={"contract_text": vendor_action.crafted_contract})
+            print(f"  Embedded {len(vendor_action.hidden_violations)} hidden violations")
+            print(f"  Techniques: {', '.join(vendor_action.concealment_techniques[:2])}")
+
+        # ── REGULATION SHOCK (optional) ─────────────────────────
+        active_shock: RegulationShock | None = None
+        shock_text = ""
+        if self.use_shocks:
+            active_shock = self.shock_engine.maybe_fire(self.episode_count)
+            if active_shock:
+                shock_text = self.shock_engine.format_for_executor(active_shock)
+                # Apply world delta from shock
+                if active_shock.world_delta:
+                    self.world.apply_delta(active_shock.world_delta)
+                print(f"\n[Shock] {active_shock.shock_type}: {active_shock.description[:80]}...")
+
         # ── ATTEMPT 1 ──────────────────────────────────────────
         print(f"\n[Attempt 1] Executor solving...")
-        action_1 = executor.act(task, world_text, attempt_number=1)
+        action_1 = executor.act(task, world_text + shock_text, attempt_number=1)
         world_coherent_1 = self.world.check_coherence(action_1.decision)
-        score_1 = arbiter.score(action_1, task, world_coherent_1)
+        score_1 = arbiter.score(action_1, task, world_coherent_1, shock=active_shock)
         feedback = arbiter.generate_feedback_prompt(score_1)
 
         print(f"  Decision: {action_1.decision[:80]}...")
         print(f"  Score 1: {score_1.weighted_total:.3f} | Coherent: {world_coherent_1}")
         print(f"  Weakest: {arbiter.get_weakest_axis(score_1)}")
+        if active_shock:
+            print(f"  Shock adapted: {score_1.shock_adapted}")
 
         # ── ATTEMPT 2 (with feedback) ───────────────────────────
         print(f"\n[Attempt 2] Executor retrying with feedback...")
-        action_2 = executor.act(task, world_text, feedback=feedback, attempt_number=2)
+        action_2 = executor.act(task, world_text + shock_text, feedback=feedback, attempt_number=2)
         world_coherent_2 = self.world.check_coherence(action_2.decision)
-        score_2 = arbiter.score(action_2, task, world_coherent_2)
+        score_2 = arbiter.score(action_2, task, world_coherent_2, shock=active_shock)
 
         print(f"  Decision: {action_2.decision[:80]}...")
         print(f"  Score 2: {score_2.weighted_total:.3f} | Coherent: {world_coherent_2}")
@@ -77,8 +121,18 @@ class EpisodeRunner:
         if score_2.world_state_delta:
             self.world.apply_delta(score_2.world_state_delta)
 
+        # ── VENDOR SCORING (adversarial) ────────────────────────
+        vendor_score: VendorScore | None = None
+        if vendor_action:
+            vendor_score = vendor_agent.score_concealment(vendor_action, score_2)
+            self.vendor_rewards.append(vendor_score.vendor_reward)
+            print(f"\n[Vendor Score] Concealment rate: {vendor_score.concealment_rate:.2f} | Vendor reward: {vendor_score.vendor_reward:.3f}")
+
         # ── FINAL REWARD ────────────────────────────────────────
         final_reward = arbiter.compute_final_reward(score_2, score_1.weighted_total)
+        # Shock adaptation bonus (+0.05 if executor correctly adapted)
+        if active_shock and score_2.shock_adapted:
+            final_reward = round(min(1.0, final_reward + 0.05), 4)
         score_2.final_reward = final_reward
 
         # ── BREAKTHROUGH CHECK ──────────────────────────────────
@@ -141,10 +195,18 @@ class EpisodeRunner:
             attempt_2=action_2,
             score_2=score_2,
             failure_record=failure,
-            architect_output=arch_output
+            architect_output=arch_output,
+            vendor_action=vendor_action,
+            vendor_score=vendor_score,
+            regulation_shock=active_shock,
+            jurisdiction=self.jurisdiction,
         )
         self.episode_log.append(log_entry)
         self._save_log(log_entry)
+
+        # ── DIVERSITY TRACKING ──────────────────────────────────
+        diversity_score = self.diversity_tracker.record(task, self.jurisdiction)
+        self.diversity_scores.append(diversity_score)
 
         # ── METRICS ─────────────────────────────────────────────
         self.reward_history.append({
@@ -152,6 +214,7 @@ class EpisodeRunner:
             "task_id": task.task_id,
             "domain": task.domain,
             "difficulty": task.difficulty,
+            "jurisdiction": self.jurisdiction,
             "score_1": score_1.weighted_total,
             "score_2": score_2.weighted_total,
             "final_reward": final_reward,
@@ -160,7 +223,15 @@ class EpisodeRunner:
             "is_breakthrough": is_breakthrough,
             "architect_active": self.use_architect,
             "in_band": 0.45 <= score_2.weighted_total <= 0.70,
-            "timestamp": datetime.now().isoformat()
+            "adversarial": self.use_adversarial,
+            "shock_fired": active_shock is not None,
+            "shock_adapted": score_2.shock_adapted if active_shock else None,
+            "vendor_reward": vendor_score.vendor_reward if vendor_score else None,
+            "consequence_if_approved": score_2.consequence_if_approved,
+            "diversity_score": diversity_score,
+            "llm_backend": _backend(),
+            "llm_model": active_backend(),
+            "timestamp": datetime.now().isoformat(),
         })
 
         summary = {
@@ -222,6 +293,8 @@ class EpisodeRunner:
             if self.architect_calibration else 0.0
         )
 
+        diversity = self.diversity_tracker.summary()
+
         return {
             "total_episodes": self.episode_count,
             "avg_final_reward": round(sum(scores) / len(scores), 4),
@@ -231,6 +304,7 @@ class EpisodeRunner:
             "in_band_rate": round(in_band / len(self.reward_history), 4),
             "architect_calibration_accuracy": round(arch_calibration, 4),
             "reward_trend": scores[-10:],
+            "diversity": diversity,
         }
 
     def save_full_log(self):

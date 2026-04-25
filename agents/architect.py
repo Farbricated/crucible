@@ -1,10 +1,8 @@
 import json
 import re
 import uuid
-from anthropic import Anthropic
 from core.schemas import FailureRecord, ArchitectOutput, TaskSpec
-
-client = Anthropic()
+from utils.llm_client import complete as llm_complete
 ALLOWED_DIFFICULTIES = {"easy", "medium", "hard", "expert"}
 
 ARCHITECT_SYSTEM_PROMPT = """You are the Architect for CRUCIBLE — a curriculum designer whose only job is to generate the next training task for the Executor.
@@ -188,14 +186,7 @@ Lineage ID to reference: {lineage_id}
 
 Return strict JSON only. No prose. All required fields must be present."""
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1500,
-        system=ARCHITECT_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    raw = response.content[0].text.strip()
+    raw = llm_complete(ARCHITECT_SYSTEM_PROMPT, prompt, max_tokens=1500)
     raw = re.sub(r"```json|```", "", raw).strip()
 
     try:

@@ -1,10 +1,7 @@
-import os
 import json
 import re
-from anthropic import Anthropic
-from core.schemas import ExecutorAction, ArbiterScore, TaskSpec
-
-client = Anthropic()
+from core.schemas import ExecutorAction, ArbiterScore, TaskSpec, RegulationShock
+from utils.llm_client import complete as llm_complete
 
 WEIGHTS = {
     "correctness": 0.35,
@@ -35,14 +32,32 @@ OUTPUT FORMAT — return ONLY valid JSON, no markdown, no preamble:
   "feedback": "plain English — what was right and what failed",
   "what_failed": "specific gap in the response",
   "what_correct_looks_like": "what a full-credit response would contain",
+  "consequence_if_approved": "one-sentence simulation of the real-world consequence if the Executor's (possibly wrong) decision were enacted — what would actually happen to AXIOM Corporation? Be specific: dollar amounts, regulatory actions, legal exposure.",
   "world_state_delta": {}
 }
 
-Be strict. Partial credit is allowed but must be earned. A response that gets the classification right but gives no regulatory citation scores 0.7 on correctness, 0.3 on reasoning_transparency."""
+Be strict. Partial credit is allowed but must be earned. A response that gets the classification right but gives no regulatory citation scores 0.7 on correctness, 0.3 on reasoning_transparency.
+
+For consequence_if_approved: always fill this field. If the decision was CORRECT, state the positive outcome. If wrong, state the real-world damage — audit triggers, contract voids, False Claims Act exposure, debarment risk, etc."""
 
 
-def score(action: ExecutorAction, task: TaskSpec, world_coherent: bool = True) -> ArbiterScore:
+def score(
+    action: ExecutorAction,
+    task: TaskSpec,
+    world_coherent: bool = True,
+    shock: RegulationShock | None = None,
+) -> ArbiterScore:
     """Score an Executor action. Returns ArbiterScore."""
+
+    shock_section = ""
+    if shock:
+        shock_section = (
+            f"\nACTIVE REGULATION SHOCK (Executor was notified):\n"
+            f"Type: {shock.shock_type} | Clause: {shock.affected_clause}\n"
+            f"New requirement: {shock.new_requirement}\n"
+            f"IMPORTANT: Check whether the Executor correctly incorporated this change. "
+            f"Failure to address the shock should reduce correctness and completeness scores.\n"
+        )
 
     prompt = f"""TASK:
 Domain: {task.domain} | Difficulty: {task.difficulty} | Target axis: {task.target_axis}
@@ -50,7 +65,7 @@ Scenario: {task.scenario_context}
 
 CONTRACT/DOCUMENT:
 {task.contract_text or 'No document provided'}
-
+{shock_section}
 EXECUTOR RESPONSE (Attempt {action.attempt_number}):
 Decision: {action.decision}
 Reasoning: {action.reasoning}
@@ -61,16 +76,7 @@ Confidence: {action.confidence}
 
 Score this response across all 5 axes. Return JSON only."""
 
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        system=ARBITER_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    raw = response.content[0].text.strip()
-
-    # Strip markdown fences if present
+    raw = llm_complete(ARBITER_SYSTEM_PROMPT, prompt, max_tokens=1200)
     raw = re.sub(r"```json|```", "", raw).strip()
 
     try:
@@ -94,6 +100,13 @@ Score this response across all 5 axes. Return JSON only."""
         for axis, weight in WEIGHTS.items()
     )
 
+    shock_adapted = False
+    if shock:
+        from core.regulation_shock import RegulationShockEngine
+        shock_adapted = RegulationShockEngine().check_executor_adapted(
+            action.decision + " " + action.reasoning, shock
+        )
+
     return ArbiterScore(
         task_id=action.task_id,
         attempt_number=action.attempt_number,
@@ -106,8 +119,10 @@ Score this response across all 5 axes. Return JSON only."""
         feedback=data.get("feedback", ""),
         what_failed=data.get("what_failed", ""),
         what_correct_looks_like=data.get("what_correct_looks_like", ""),
+        consequence_if_approved=data.get("consequence_if_approved", ""),
         world_state_delta=data.get("world_state_delta", {}),
         world_coherent=world_coherent,
+        shock_adapted=shock_adapted,
     )
 
 

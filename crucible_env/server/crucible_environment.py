@@ -40,9 +40,20 @@ except ImportError:
 
 
 class CrucibleEnvironment(Environment):
-    def __init__(self, use_architect: bool = False, seed: int = 42):
+    def __init__(
+        self,
+        use_architect: bool = False,
+        seed: int = 42,
+        use_adversarial: bool = False,
+        use_shocks: bool = False,
+        shock_probability: float = 0.25,
+        jurisdiction: str = "FAR",
+    ):
         self.world = WorldStateManager(seed)
         self.use_architect = use_architect
+        self.use_adversarial = use_adversarial
+        self.use_shocks = use_shocks
+        self.jurisdiction = jurisdiction
         self.episode_count = 0
         self.all_failures = []
         self.last_scores = []
@@ -54,17 +65,49 @@ class CrucibleEnvironment(Environment):
         self.breakthrough_count = 0
         self._current_task = None
         self._current_observation = None
+        self._active_shock = None
+        self._shock_text = ""
+
+        # Lazy imports for optional features
+        self._shock_engine = None
+        if use_shocks:
+            try:
+                from core.regulation_shock import RegulationShockEngine
+            except ImportError:
+                from crucible_env.core.regulation_shock import RegulationShockEngine
+            self._shock_engine = RegulationShockEngine(shock_probability, jurisdiction)
 
     def reset(self) -> CrucibleObservation:
         """Start a new episode. Called at beginning of each training step."""
         self.episode_count += 1
         self.world.reset()
+        self._active_shock = None
+        self._shock_text = ""
 
         task = self._get_next_task()
+
+        # Adversarial: Vendor crafts the contract
+        if self.use_adversarial:
+            try:
+                from agents.vendor import craft as vendor_craft
+            except ImportError:
+                from crucible_env.agents.vendor import craft as vendor_craft
+            vendor_action = vendor_craft(task, self.jurisdiction, task.difficulty)
+            task = task.model_copy(update={"contract_text": vendor_action.crafted_contract})
+
+        # Regulation shock
+        if self._shock_engine:
+            shock = self._shock_engine.maybe_fire(self.episode_count)
+            if shock:
+                self._active_shock = shock
+                self._shock_text = self._shock_engine.format_for_executor(shock)
+                if shock.world_delta:
+                    self.world.apply_delta(shock.world_delta)
+
         self._current_task = task
 
         obs = CrucibleObservation(
-            world_state_text=self.world.render(),
+            world_state_text=self.world.render() + self._shock_text,
             task_description=task.scenario_context,
             contract_text=task.contract_text or "",
             domain=task.domain,
@@ -93,23 +136,26 @@ class CrucibleEnvironment(Environment):
         )
 
         world_coherent_1 = self.world.check_coherence(action.decision)
-        score_1 = arbiter_score(exec_action_1, task, world_coherent_1)
+        score_1 = arbiter_score(exec_action_1, task, world_coherent_1, shock=self._active_shock)
         feedback = generate_feedback_prompt(score_1)
 
         exec_action_2 = executor_act(
             task=task,
-            world_state_text=self.world.render(),
+            world_state_text=self.world.render() + self._shock_text,
             feedback=feedback,
             attempt_number=2,
         )
 
         world_coherent_2 = self.world.check_coherence(exec_action_2.decision)
-        score_2 = arbiter_score(exec_action_2, task, world_coherent_2)
+        score_2 = arbiter_score(exec_action_2, task, world_coherent_2, shock=self._active_shock)
 
         if score_2.world_state_delta:
             self.world.apply_delta(score_2.world_state_delta)
 
         final_reward = compute_final_reward(score_2, score_1.weighted_total)
+        # Shock adaptation bonus
+        if self._active_shock and score_2.shock_adapted:
+            final_reward = round(min(1.0, final_reward + 0.05), 4)
         score_2.final_reward = final_reward
 
         is_breakthrough = self._check_breakthrough(task, score_2.weighted_total)
@@ -189,6 +235,9 @@ class CrucibleEnvironment(Environment):
             next_task_difficulty=next_difficulty,
             lineage_id=lineage_id,
             is_breakthrough=is_breakthrough,
+            consequence_if_approved=score_2.consequence_if_approved,
+            shock_fired=self._active_shock is not None,
+            shock_adapted=score_2.shock_adapted,
         )
         self._current_observation = obs
         return obs

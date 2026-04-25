@@ -1,36 +1,51 @@
-import os
 import json
 import re
-import time
-from anthropic import Anthropic
 from core.schemas import TaskSpec, ExecutorAction
+from utils.llm_client import complete as llm_complete, active_backend
 
-client = Anthropic()
-MAX_RETRIES = 3
-
-EXECUTOR_SYSTEM_PROMPT = """You are the Executor for CRUCIBLE — an AI agent working as a compliance analyst at AXIOM Corporation, an aerospace and defense contractor.
+EXECUTOR_SYSTEM_PROMPT = """You are the Executor for CRUCIBLE — an AI agent working as a compliance analyst at AXIOM Corporation, an aerospace and defense contractor with both US and European operations.
 
 Your job is to analyze procurement documents, contracts, and vendor bids for regulatory violations and compliance issues.
 
-Key regulations you must know:
-- FAR (Federal Acquisition Regulation) — primary procurement rules
+US REGULATIONS (FAR/DFARS):
+- FAR (Federal Acquisition Regulation) — primary US procurement rules
 - DFARS (Defense Federal Acquisition Regulation Supplement) — DoD-specific rules
 - FAR 52.219-x — Small Business subcontracting requirements
 - FAR 4.1102 — SAM.gov registration requirements
 - FAR 6.302-x — Justifications for other than full and open competition
 - FAR 52.203-13 — Contractor Code of Business Ethics
-- FAR 52.244-2 — Subcontract consent requirements
+- FAR 52.244-2 — Subcontract consent requirements (written consent >$150K)
 - FAR 52.232-16 — Progress payment rates (standard: 80%)
-- FAR 15.407-1 — Defective pricing
+- FAR 15.407-1 / TINA — Defective pricing and certified cost/pricing data
 - CAS (Cost Accounting Standards) — 48 CFR 9903
-- TINA (Truth in Negotiations Act) — certified cost/pricing data
 - FAR 9.5 — Organizational Conflicts of Interest (OCI)
+- DFARS 252.204-7012 — Safeguarding Covered Defense Information (cybersecurity)
+- DFARS 252.225-7001 — Buy American Act (domestic end products)
+- ITAR 22 CFR 120-130 / EAR 15 CFR 730-774 — Export control
+
+EU REGULATIONS (AXIOM Europe GmbH operations):
+- Directive 2014/24/EU — Public Procurement (main instrument)
+- Directive 2014/25/EU — Utilities procurement
+- Directive 2014/23/EU — Concession contracts
+- Art 4 — Thresholds (works: €5.35M; services/supplies central gov: €135K)
+- Art 26 — Choice of procedure (open, restricted, negotiated, competitive dialogue)
+- Art 32 — Negotiated procedure without publication (narrow exceptions only)
+- Art 33 — Framework agreements (max 4 years; must state maximum value)
+- Art 57 — Exclusion grounds (mandatory and discretionary)
+- Art 67 — Award criteria (MEAT — Most Economically Advantageous Tender)
+- Art 72 — Modification of contracts during performance
+- Directive 89/665/EEC / 2007/66/EC — Remedies and standstill periods
+- ESPD (European Single Procurement Document) — self-declaration of eligibility
+
+JURISDICTION NOTE: When analyzing EU contracts, apply EU Directive rules.
+When analyzing US contracts, apply FAR/DFARS rules.
+The contract domain header will tell you which jurisdiction applies.
 
 OUTPUT FORMAT — return ONLY valid JSON, no markdown:
 {
   "reasoning": "step by step analysis of the document",
   "decision": "COMPLIANT or NON-COMPLIANT",
-  "violations_found": ["list of specific violations with FAR clause citations"],
+  "violations_found": ["list of specific violations with clause citations"],
   "supporting_evidence": ["key text passages that support your decision"],
   "confidence": 0.0-1.0,
   "recommendation": "specific action to take"
@@ -53,38 +68,20 @@ def act(
         prompt += f"ARBITER FEEDBACK:\n{feedback}\n\n"
     prompt += "Provide your analysis in the required JSON format."
 
-    response = None
-    last_error = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=1000,
-                system=EXECUTOR_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            break
-        except Exception as exc:
-            last_error = exc
-            if attempt == MAX_RETRIES:
-                break
-            # Exponential backoff for transient API/network failures.
-            time.sleep(0.8 * (2 ** (attempt - 1)))
-
-    if response is None:
+    try:
+        raw = llm_complete(EXECUTOR_SYSTEM_PROMPT, prompt, max_tokens=1200)
+        raw = re.sub(r"```json|```", "", raw).strip()
+    except Exception as exc:
         return ExecutorAction(
             task_id=task.task_id,
             attempt_number=attempt_number,
             decision="PARSE_ERROR",
-            reasoning=f"Executor API call failed after retries: {type(last_error).__name__}",
+            reasoning=f"Executor LLM call failed: {type(exc).__name__}: {exc}",
             confidence=0.0,
             violations_found=[],
             supporting_evidence=[],
             recommendation=None,
         )
-
-    raw = response.content[0].text.strip()
-    raw = re.sub(r"```json|```", "", raw).strip()
 
     try:
         data = json.loads(raw)

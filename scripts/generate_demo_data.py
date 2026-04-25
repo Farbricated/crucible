@@ -40,6 +40,10 @@ def _target_score(episode: int) -> float:
     return _clip(base + noise)
 
 
+JURISDICTIONS = ["FAR", "FAR", "FAR", "DFARS", "EU"]
+SHOCK_TYPES = ["threshold_change", "vendor_debarment", "new_clause", "sanctions_update", None, None, None]
+
+
 def generate_records(num_episodes: int = 80) -> list[dict]:
     random.seed(2026)
     records = []
@@ -47,6 +51,13 @@ def generate_records(num_episodes: int = 80) -> list[dict]:
 
     phase3_candidates = list(range(58, 81))
     breakthrough_eps = set(random.sample(phase3_candidates, 5))
+    adversarial_eps = set(random.sample(range(30, 81), 15))
+    shock_eps = set(random.sample(range(1, 81), 20))
+
+    # Per-axis failure counts for heatmap (realistic: reasoning_transparency weakest early)
+    axis_fail_weights_early = [0.15, 0.18, 0.35, 0.12, 0.20]   # episodes 1-20
+    axis_fail_weights_mid =   [0.20, 0.25, 0.25, 0.15, 0.15]   # episodes 21-50
+    axis_fail_weights_late =  [0.22, 0.22, 0.20, 0.18, 0.18]   # episodes 51-80
 
     for ep in range(1, num_episodes + 1):
         score_2 = round(_target_score(ep), 4)
@@ -56,26 +67,61 @@ def generate_records(num_episodes: int = 80) -> list[dict]:
             score_1 = round(max(0.0, score_2 - 0.02), 4)
 
         delta = round(score_2 - score_1, 4)
-        final_reward = round(_clip(score_2 + random.uniform(-0.03, 0.03)), 4)
+
+        adversarial = ep in adversarial_eps
+        shock_fired = ep in shock_eps
+        shock_adapted = shock_fired and random.random() < (0.30 + ep / 200)
+        shock_bonus = 0.05 if shock_adapted else 0.0
+
+        final_reward = round(_clip(score_2 + shock_bonus + random.uniform(-0.03, 0.03)), 4)
         architect_active = ep >= 51
         in_band = 0.45 <= score_2 <= 0.70
         if architect_active and ep in breakthrough_eps:
             score_2 = round(max(score_2, 0.71), 4)
         is_breakthrough = architect_active and ep in breakthrough_eps and score_2 > 0.70
 
+        # Weakest axis weighted by phase
+        if ep <= 20:
+            weights = axis_fail_weights_early
+        elif ep <= 50:
+            weights = axis_fail_weights_mid
+        else:
+            weights = axis_fail_weights_late
+        weakest = random.choices(AXES, weights=weights, k=1)[0]
+
+        # Vendor reward: adversarial episodes show declining vendor power over time
+        vendor_reward = None
+        if adversarial:
+            vendor_reward = round(_clip(0.65 - ep * 0.003 + random.uniform(-0.1, 0.1)), 4)
+
+        jurisdiction = JURISDICTIONS[(ep - 1) % len(JURISDICTIONS)]
+        domain = "eu_procurement" if jurisdiction == "EU" else "procurement"
+        shock_type = random.choice(SHOCK_TYPES) if shock_fired else None
+
         record = {
             "episode": ep,
             "task_id": f"demo-task-{ep:03d}",
-            "domain": "procurement",
+            "domain": domain,
+            "jurisdiction": jurisdiction,
             "difficulty": DIFFICULTIES[(ep - 1) % len(DIFFICULTIES)],
             "score_1": score_1,
             "score_2": score_2,
             "final_reward": final_reward,
             "delta": delta,
-            "weakest_axis": AXES[(ep - 1) % len(AXES)],
+            "weakest_axis": weakest,
             "is_breakthrough": is_breakthrough,
             "architect_active": architect_active,
             "in_band": in_band,
+            "adversarial": adversarial,
+            "vendor_reward": vendor_reward,
+            "shock_fired": shock_fired,
+            "shock_type": shock_type,
+            "shock_adapted": shock_adapted if shock_fired else None,
+            "consequence_if_approved": (
+                "Approved: contract voided, DoD audit triggered" if score_2 < 0.5
+                else "Correct decision — AXIOM avoids $2.1M compliance exposure"
+            ),
+            "diversity_score": round(0.85 - ep * 0.002 + random.uniform(-0.1, 0.15), 4) if ep > 10 else round(random.uniform(0.7, 1.0), 4),
             "timestamp": (start + timedelta(minutes=ep * 7)).isoformat(),
         }
         records.append(record)
@@ -192,6 +238,139 @@ def plot_before_after(records: list[dict]) -> None:
     plt.close(fig)
 
 
+def plot_axis_heatmap(records: list[dict]) -> None:
+    """Heatmap: failure rate per axis × difficulty tier."""
+    import numpy as np
+
+    axis_diff_counts = {diff: {ax: 0 for ax in AXES} for diff in DIFFICULTIES}
+    axis_diff_totals = {diff: 0 for diff in DIFFICULTIES}
+
+    for r in records:
+        diff = r["difficulty"]
+        axis = r["weakest_axis"]
+        if diff in axis_diff_counts and axis in axis_diff_counts[diff]:
+            axis_diff_counts[diff][axis] += 1
+            axis_diff_totals[diff] += 1
+
+    matrix = np.zeros((len(DIFFICULTIES), len(AXES)))
+    for i, diff in enumerate(DIFFICULTIES):
+        total = axis_diff_totals[diff] or 1
+        for j, ax in enumerate(AXES):
+            matrix[i][j] = axis_diff_counts[diff][ax] / total
+
+    short_axes = ["correct.", "complete.", "reasoning", "effic.", "general."]
+    fig, ax = plt.subplots(figsize=(10, 4))
+    plt.style.use("seaborn-v0_8")
+    im = ax.imshow(matrix, cmap="YlOrRd", aspect="auto", vmin=0, vmax=0.5)
+    ax.set_xticks(range(len(AXES)))
+    ax.set_xticklabels(short_axes, fontsize=11)
+    ax.set_yticks(range(len(DIFFICULTIES)))
+    ax.set_yticklabels([d.upper() for d in DIFFICULTIES], fontsize=11)
+    for i in range(len(DIFFICULTIES)):
+        for j in range(len(AXES)):
+            ax.text(j, i, f"{matrix[i][j]:.0%}", ha="center", va="center",
+                    color="black" if matrix[i][j] < 0.3 else "white", fontsize=10)
+    plt.colorbar(im, ax=ax, label="Failure Rate")
+    ax.set_title("CRUCIBLE: Where AXIOM Keeps Failing — Axis × Difficulty Heatmap")
+    ax.set_xlabel("Arbiter Scoring Axis")
+    ax.set_ylabel("Task Difficulty")
+    plt.tight_layout()
+    plt.savefig(PLOTS_DIR / "axis_heatmap.png", dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_adversarial_arms_race(records: list[dict]) -> None:
+    """Vendor reward vs Executor reward over adversarial episodes."""
+    adv = [r for r in records if r.get("adversarial") and r.get("vendor_reward") is not None]
+    if not adv:
+        return
+
+    ep_nums = [r["episode"] for r in adv]
+    vendor_rewards = [r["vendor_reward"] for r in adv]
+    exec_rewards = [r["final_reward"] for r in adv]
+
+    plt.figure(figsize=(10, 5))
+    plt.style.use("seaborn-v0_8")
+    plt.plot(ep_nums, exec_rewards, color="green", linewidth=2, marker="o", markersize=4, label="Executor reward")
+    plt.plot(ep_nums, vendor_rewards, color="red", linewidth=2, marker="x", markersize=5, label="Vendor reward (concealment)")
+    plt.axhline(y=0.5, color="gray", linestyle="--", linewidth=1)
+    plt.fill_between(ep_nums, exec_rewards, vendor_rewards,
+                     where=[e > v for e, v in zip(exec_rewards, vendor_rewards)],
+                     alpha=0.15, color="green", label="Executor winning")
+    plt.fill_between(ep_nums, exec_rewards, vendor_rewards,
+                     where=[e <= v for e, v in zip(exec_rewards, vendor_rewards)],
+                     alpha=0.15, color="red", label="Vendor winning")
+    plt.xlabel("Episode")
+    plt.ylabel("Reward (0.0 - 1.0)")
+    plt.title("CRUCIBLE: Adversarial Arms Race — Vendor vs Executor")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(PLOTS_DIR / "adversarial_arms_race.png", dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_shock_adaptation(records: list[dict]) -> None:
+    """Rolling adaptation rate for regulation shock episodes."""
+    shock_eps = [r for r in records if r.get("shock_fired")]
+    if len(shock_eps) < 3:
+        return
+
+    ep_nums = [r["episode"] for r in shock_eps]
+    adapted = [1 if r.get("shock_adapted") else 0 for r in shock_eps]
+    rolling = []
+    for i in range(len(adapted)):
+        vals = adapted[max(0, i - 4): i + 1]
+        rolling.append(sum(vals) / len(vals))
+
+    plt.figure(figsize=(10, 4))
+    plt.style.use("seaborn-v0_8")
+    plt.bar(ep_nums, adapted, color=["green" if a else "red" for a in adapted],
+            alpha=0.4, label="Adapted (1) / Failed (0)")
+    plt.plot(ep_nums, rolling, color="blue", linewidth=2.5, label="Rolling adaptation rate (5 ep)")
+    plt.axhline(y=0.5, color="gray", linestyle="--", linewidth=1, label="50% baseline")
+    plt.xlabel("Episode (shock episodes only)")
+    plt.ylabel("Adaptation Rate")
+    plt.title("CRUCIBLE: Executor Adaptation to Regulation Shocks")
+    plt.ylim(0, 1.1)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(PLOTS_DIR / "shock_adaptation.png", dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_jurisdiction_comparison(records: list[dict]) -> None:
+    """Average reward by jurisdiction (FAR vs DFARS vs EU)."""
+    from collections import defaultdict
+    jur_rewards = defaultdict(list)
+    for r in records:
+        jur = r.get("jurisdiction", "FAR")
+        jur_rewards[jur].append(r["final_reward"])
+
+    jurisdictions = sorted(jur_rewards.keys())
+    avgs = [sum(jur_rewards[j]) / len(jur_rewards[j]) for j in jurisdictions]
+    counts = [len(jur_rewards[j]) for j in jurisdictions]
+    colors = {"FAR": "#4ade80", "DFARS": "#60a5fa", "EU": "#f97316"}
+
+    plt.figure(figsize=(8, 5))
+    plt.style.use("seaborn-v0_8")
+    bars = plt.bar(jurisdictions, avgs,
+                   color=[colors.get(j, "#a78bfa") for j in jurisdictions],
+                   alpha=0.85, edgecolor="black", linewidth=0.5)
+    for bar, count, avg in zip(bars, counts, avgs):
+        plt.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                 f"n={count}\n{avg:.3f}", ha="center", va="bottom", fontsize=10)
+    plt.axhline(y=0.45, color="blue", linestyle="--", linewidth=1.5, label="Learning band floor")
+    plt.axhline(y=0.70, color="green", linestyle="--", linewidth=1.5, label="Learning band ceiling")
+    plt.xlabel("Jurisdiction")
+    plt.ylabel("Average Final Reward")
+    plt.title("CRUCIBLE: Cross-Jurisdiction Generalization (FAR / DFARS / EU)")
+    plt.ylim(0, 1.0)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(PLOTS_DIR / "jurisdiction_comparison.png", dpi=150, bbox_inches="tight")
+    plt.close()
+
+
 def main() -> None:
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     records = generate_records(80)
@@ -200,7 +379,11 @@ def main() -> None:
     plot_training_curve(records)
     plot_architect_calibration(records)
     plot_before_after(records)
-    print("Generated demo data and plots.")
+    plot_axis_heatmap(records)
+    plot_adversarial_arms_race(records)
+    plot_shock_adaptation(records)
+    plot_jurisdiction_comparison(records)
+    print("Generated demo data and all plots (including adversarial, shock, heatmap, jurisdiction).")
 
 
 if __name__ == "__main__":
