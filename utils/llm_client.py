@@ -42,11 +42,56 @@ HF_MODEL = os.getenv(
 # Anthropic model (fallback)
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
-MAX_RETRIES = 6          # higher ceiling — rate-limit retries are cheap
-GROQ_MAX_RETRIES = 6    # Groq-specific: 429 retries on top of backend fallbacks
+MAX_RETRIES      = 5   # HF / Anthropic retry ceiling
+GROQ_MAX_RETRIES = 5   # Groq: 429 + general error retries
+_GROQ_BACKOFF_BASE = 2.0   # seconds — doubles each attempt, capped at 32s
 _hf_client = None
 _anthropic_client = None
 _groq_client = None
+
+# ─────────────────────────────────────────────────────────────
+# Daily token budget (450K = 500K TPD limit minus 50K buffer)
+# ─────────────────────────────────────────────────────────────
+_GROQ_DAILY_BUDGET: int = int(os.getenv("GROQ_DAILY_BUDGET", "450000"))
+_daily_tokens_used: int = 0
+_daily_reset_date = None        # date object; reset counter when date changes
+_daily_lock = threading.Lock()
+
+
+def _check_and_record_daily(tokens: int, record: bool = False) -> None:
+    """
+    Pre-call: raise BudgetExceeded if daily limit would be breached.
+    Post-call (record=True): add actual tokens to today's counter.
+    Thread-safe.
+    """
+    global _daily_tokens_used, _daily_reset_date
+    from datetime import date
+    with _daily_lock:
+        today = date.today()
+        if _daily_reset_date != today:
+            _daily_tokens_used = 0
+            _daily_reset_date  = today
+        if record:
+            _daily_tokens_used += tokens
+            return
+        remaining = _GROQ_DAILY_BUDGET - _daily_tokens_used
+        if tokens > remaining:
+            raise RuntimeError(
+                f"[BudgetExceeded] Groq daily budget exhausted: "
+                f"{_daily_tokens_used:,}/{_GROQ_DAILY_BUDGET:,} tokens used today. "
+                f"Remaining: {remaining:,}. Reset at midnight UTC."
+            )
+
+
+def get_daily_budget_status() -> dict:
+    """Return current daily token usage for monitoring."""
+    global _daily_tokens_used
+    return {
+        "budget": _GROQ_DAILY_BUDGET,
+        "used": _daily_tokens_used,
+        "remaining": max(0, _GROQ_DAILY_BUDGET - _daily_tokens_used),
+        "pct_used": round(_daily_tokens_used / _GROQ_DAILY_BUDGET * 100, 1),
+    }
 
 # ─────────────────────────────────────────────────────────────
 # Live call-counter (visible on dashboard)
@@ -230,7 +275,7 @@ def complete(
                 except Exception:
                     pass
             if attempt < MAX_RETRIES:
-                time.sleep(0.8 * (2 ** (attempt - 1)))
+                time.sleep(min(32.0, _GROQ_BACKOFF_BASE * (2 ** (attempt - 1))))
 
     raise RuntimeError(f"LLM call failed after {MAX_RETRIES} attempts: {last_error}")
 
@@ -278,9 +323,10 @@ def _complete_groq(
     if not GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY is not set")
 
-    # ── Pre-flight: wait if sliding window is too full ───────
+    # ── Pre-flight: daily budget check then TPM rate limiter ─
     estimated = _estimate_tokens(system_prompt, user_prompt, max_tokens)
-    _groq_limiter.acquire(estimated)
+    _check_and_record_daily(estimated)          # raises if over daily budget
+    _groq_limiter.acquire(estimated)            # blocks until per-minute window clears
 
     client = _get_groq_client()
     messages = [
@@ -297,9 +343,10 @@ def _complete_groq(
                 temperature=temperature,
             )
 
-            # Record actual tokens in the sliding window
+            # Record actual tokens in sliding window and daily counter
             actual_tokens = resp.usage.total_tokens if resp.usage else estimated
             _groq_limiter.record(actual_tokens)
+            _check_and_record_daily(actual_tokens, record=True)
 
             # Update global stats
             _call_stats["groq"]["calls"] += 1
@@ -324,10 +371,10 @@ def _complete_groq(
                 )
                 time.sleep(wait)
             else:
-                # Non-rate-limit error: exponential backoff
+                # Non-rate-limit error: exponential backoff (2s base, 32s cap, 5 retries)
                 if attempt >= GROQ_MAX_RETRIES:
                     raise
-                backoff = 0.8 * (2 ** (attempt - 1))
+                backoff = min(32.0, _GROQ_BACKOFF_BASE * (2 ** (attempt - 1)))
                 time.sleep(backoff)
 
     raise RuntimeError(f"Groq call failed after {GROQ_MAX_RETRIES} attempts")
@@ -369,6 +416,7 @@ def active_backend() -> str:
 
 def backend_info() -> dict:
     """Return backend configuration as a dict (for logging/dashboard)."""
+    budget = get_daily_budget_status()
     return {
         "backend": _backend(),
         "groq_model": GROQ_MODEL,
@@ -376,6 +424,10 @@ def backend_info() -> dict:
         "groq_tpm_limit": _GROQ_TPM_LIMIT,
         "groq_tpm_effective": _GROQ_TPM_EFFECTIVE,
         "groq_window_used": _groq_limiter._used(),
+        "groq_daily_budget": budget["budget"],
+        "groq_daily_used": budget["used"],
+        "groq_daily_remaining": budget["remaining"],
+        "groq_daily_pct": budget["pct_used"],
         "hf_model": HF_MODEL,
         "hf_token_set": bool(HF_TOKEN),
         "anthropic_key_set": bool(ANTHROPIC_API_KEY),

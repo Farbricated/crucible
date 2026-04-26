@@ -3,38 +3,36 @@ import re
 import uuid
 from core.schemas import FailureRecord, ArchitectOutput, TaskSpec
 from utils.llm_client import complete as llm_complete
+from utils.clauses import key_value, threshold
+
 ALLOWED_DIFFICULTIES = {"easy", "medium", "hard", "expert"}
 
-ARCHITECT_SYSTEM_PROMPT = """You are the Architect for CRUCIBLE — a curriculum designer whose only job is to generate the next training task for the Executor.
-
-You read the Executor's failure history and generate a task that:
-1. Targets the Executor's WEAKEST scoring axis
-2. Is calibrated to land the Executor in the 0.45–0.70 scoring band (productive learning zone)
-3. Is harder than what the Executor has been getting right easily
-
-THE BAND RULES:
-- Below 0.20 = too hard, no learning signal — DO NOT generate tasks this hard
-- 0.45–0.70 = productive learning zone — THIS IS YOUR TARGET
-- Above 0.90 = too easy, no learning signal — DO NOT generate tasks this easy
-
-ESCALATION TECHNIQUES for procurement domain:
-- Hide violations inside legitimate-looking contract language
-- Chain two regulatory frameworks that conflict
-- Add a vendor with undisclosed prior violations
-- Introduce an OCI (conflict of interest) that is subtle
-- Use correct FAR clause numbers but wrong applicability thresholds
-
-OUTPUT FORMAT — return ONLY valid JSON, no markdown:
-{
-  "domain": "procurement",
-  "difficulty": "easy|medium|hard|expert",
-  "target_axis": "the weakest axis you are targeting",
-  "scenario_context": "plain English task instruction for the Executor",
-  "contract_text": "the full contract/document text the Executor must analyze",
-  "expected_score_range": [0.45, 0.70],
-  "architect_reasoning": "plain English explanation of WHY you generated this task and HOW it targets the weakness",
-  "lineage_id": "the failure_id that triggered this task"
-}"""
+ARCHITECT_SYSTEM_PROMPT = (
+    "You are the Architect for CRUCIBLE — a curriculum designer. "
+    "Generate the next training task for the Executor based on its failure history.\n\n"
+    "RULES:\n"
+    "1. Target the Executor's WEAKEST scoring axis.\n"
+    "2. Calibrate difficulty to land the Executor in the 0.45–0.70 scoring band (productive learning zone).\n"
+    "3. Below 0.20 = too hard (no learning signal). Above 0.90 = too easy (no learning signal).\n\n"
+    "ESCALATION TECHNIQUES:\n"
+    "- Hide violations inside legitimate-looking contract language\n"
+    "- Chain two regulatory frameworks that conflict\n"
+    "- Use correct clause numbers but wrong applicability thresholds\n"
+    "- Introduce a subtle OCI\n"
+    "- Add an undisclosed prior violation\n\n"
+    'OUTPUT FORMAT — return ONLY valid JSON, no markdown:\n'
+    "{\n"
+    '  "domain": "procurement",\n'
+    '  "difficulty": "easy|medium|hard|expert",\n'
+    '  "target_axis": "weakest axis being targeted",\n'
+    '  "scenario_context": "plain English task instruction for the Executor",\n'
+    '  "contract_text": "full contract/document text to analyze",\n'
+    '  "expected_score_range": [0.45, 0.70],\n'
+    '  "architect_reasoning": "why this task targets the weakness",\n'
+    '  "lineage_id": "failure_id that triggered this task"\n'
+    "}\n\n"
+    "Return JSON only. No explanation."
+)
 
 
 def _compute_axis_averages(failures: list[FailureRecord]) -> dict:
@@ -83,12 +81,28 @@ def _adjust_difficulty(last_3_scores: list[float], current_difficulty: str) -> s
 
 
 def _fallback_task_data(adjusted_difficulty: str, weakest_axis: str, lineage_id: str) -> dict:
+    # Reference clause values from CLAUSE_REGISTRY — no hardcoded magic numbers.
+    progress_kv   = key_value("FAR 52.232-16")      # "standard rate 80%; above requires written CO approval"
+    ethics_kv     = key_value("FAR 52.203-13")       # "ethics clause mandatory >$6M / >120 days"
+    consent_kv    = key_value("FAR 52.244-2")        # "written CO consent required ≥$150K subcontract"
+    progress_rate = threshold("FAR 52.232-16", "standard_rate_pct", 80)   # 80
+
+    contract_text = (
+        "CONTRACT MOD — AXIOM-FALLBACK\n"
+        "Value: $2.1M | Type: Cost-Plus-Fixed-Fee\n"
+        f"SAM.gov: Current\n"
+        f"Small business subcontracting goal: 20% committed, 9% actual (see Attachment B)\n"
+        f"FAR 52.203-13 Ethics Clause: Not included ({ethics_kv})\n"
+        f"Progress payments: {progress_rate + 5}% ({progress_kv})\n"
+        f"Subcontract consent: Verbal acknowledgement recorded ({consent_kv})\n"
+        "Award Recommendation: Approve pending final review."
+    )
     return {
         "domain": "procurement",
         "difficulty": adjusted_difficulty,
         "target_axis": weakest_axis,
         "scenario_context": "Review this contract modification for FAR compliance violations. Identify all issues.",
-        "contract_text": "CONTRACT MOD — AXIOM-FALLBACK\nValue: $2.1M\nSAM.gov: Current\nSmall business goal: 20% committed, 9% actual\nFAR 52.203-13: Missing\nProgress payments: 85% (standard is 80%, no justification)",
+        "contract_text": contract_text,
         "expected_score_range": [0.45, 0.70],
         "architect_reasoning": f"Fallback task generated. Targeting {weakest_axis}.",
         "lineage_id": lineage_id,
@@ -186,7 +200,7 @@ Lineage ID to reference: {lineage_id}
 
 Return strict JSON only. No prose. All required fields must be present."""
 
-    raw = llm_complete(ARCHITECT_SYSTEM_PROMPT, prompt, max_tokens=1500)
+    raw = llm_complete(ARCHITECT_SYSTEM_PROMPT, prompt, max_tokens=400)
     raw = re.sub(r"```json|```", "", raw).strip()
 
     try:
