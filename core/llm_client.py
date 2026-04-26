@@ -2,7 +2,7 @@
 Canonical LLM client for CRUCIBLE.
 
 Two backends, selected by LLM_BACKEND env var:
-  groq  — Groq SDK (llama-3.1-8b-instant). DEV mode.
+  groq  — Groq SDK (llama-3.3-70b-versatile). DEV mode.
   hf    — HuggingFace Inference API. SUBMISSION mode.
 
 Key behaviours:

@@ -122,6 +122,9 @@ class CrucibleEnvironment(Environment):
         return obs
 
     def step(self, action: CrucibleAction) -> CrucibleObservation:
+        # The HTTP server creates a fresh env per request; auto-reset if needed.
+        if self._current_task is None:
+            self.reset()
         task = self._current_task
 
         exec_action_1 = ExecutorAction(
@@ -240,6 +243,7 @@ class CrucibleEnvironment(Environment):
         self._current_observation = obs
         return obs
 
+    @property
     def state(self) -> CrucibleState:
         arch_cal = (
             sum(self.architect_calibration) / len(self.architect_calibration)

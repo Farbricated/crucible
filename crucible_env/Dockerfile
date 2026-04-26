@@ -13,7 +13,7 @@ COPY . ./
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir \
-       "openenv-core==0.2.3" \
+       "openenv-core>=0.2.3" \
        "huggingface_hub>=1.0.0" \
        "anthropic>=0.40.0" \
        "groq>=0.11.0" \

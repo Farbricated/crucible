@@ -125,4 +125,5 @@ Scoring weights: correctness 35%, completeness 25%, reasoning_transparency 20%, 
 - ✅ Long-Horizon Planning (cross-domain mission chains)
 
 ## Team
-Akarsh Sangisetti & Sarika Jivrajika
+
+**Digital Yudh** — [Sangisetti Akarsh](https://huggingface.co/Flake56) · [Sarika Jivrajika](https://huggingface.co/False45)

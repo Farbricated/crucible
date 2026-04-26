@@ -2,6 +2,8 @@
 
 > **+78% reward improvement** (0.433 → 0.771) over 80 real episodes · 4 AI Agents · Groq-Powered · OpenEnv Hackathon 2026
 
+**Team Digital Yudh** — [Sangisetti Akarsh](https://huggingface.co/Flake56) (`akarshsangisetti@gmail.com`) · [Sarika Jivrajika](https://huggingface.co/False45) (`jivrajikasarika2005@gmail.com`)
+
 ## Submission Links
 
 | Artifact | Link |
@@ -10,14 +12,19 @@
 | Training Notebook | [`crucible_env/training/crucible_grpo.ipynb`](crucible_env/training/crucible_grpo.ipynb) · [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Flake56/crucible-env/blob/main/crucible_env/training/crucible_grpo.ipynb) |
 | Blog Writeup | [`BLOG.md`](BLOG.md) — also posted on [HuggingFace Blog](https://huggingface.co/blog/Flake56/crucible) |
 | Pitch Deck (6 slides, ~90 sec) | [`SLIDES.md`](SLIDES.md) |
-| OpenEnv Version | `openenv-core==0.2.3` (pinned in [`crucible_env/pyproject.toml`](crucible_env/pyproject.toml)) |
+| OpenEnv Version | `openenv-core>=0.2.3` (declared in [`crucible_env/pyproject.toml`](crucible_env/pyproject.toml)) |
 
 ## Quick Reviewer Guide (3-min read)
 
-1. **What is this?** A self-improving multi-agent RL environment where an Executor LLM learns to detect procurement-fraud violations at a defense contractor. Four agents (Executor, Arbiter, Architect, Vendor) plus dynamic regulation shocks create an environment that gets harder as the agent improves — no ceiling.
-2. **Does it learn?** Yes. Reward climbs from **0.433 → 0.771 (+78%)** across 80 real Groq episodes. See [`plots/training_reward_curve.png`](plots/training_reward_curve.png) and [`plots/baseline_vs_trained.png`](plots/baseline_vs_trained.png).
-3. **Why does it matter?** Procurement fraud costs the US DoD billions annually. CRUCIBLE is the first RL env that combines adversarial red-team dynamics, self-improving curriculum, regulatory distribution shift, and cross-jurisdiction generalization in one coherent task.
-4. **Run it in 30 seconds:** `pip install -r requirements.txt && python main.py full` — or open the dashboard: `streamlit run demo/dashboard.py`.
+**The story in one sentence:** An AI agent learns to detect procurement fraud at a fictional defense contractor — and the training environment gets harder every time the agent fails, forever.
+
+![Baseline vs Trained (same axes)](plots/baseline_vs_trained.png)
+*Left: untrained baseline (avg 0.433). Right: trained agent (avg 0.771). Same tasks, same contract. +78% in 80 real episodes.*
+
+1. **What is this?** A self-improving multi-agent RL environment where an Executor LLM learns to detect procurement-fraud violations at AXIOM Corporation, a fictional aerospace and defense contractor. Four agents (Executor, Arbiter, Architect, Vendor) plus dynamic regulation shocks create an environment that gets harder as the agent improves — no ceiling.
+2. **Does it learn?** Yes. Reward climbs from **0.433 → 0.771 (+78%)** across 80 real Groq episodes. The Executor goes from missing obvious FAR violations to catching adversarially-hidden ones. See [`plots/training_reward_curve.png`](plots/training_reward_curve.png).
+3. **Why does it matter?** Procurement fraud costs the US DoD an estimated **$36 billion annually**. CRUCIBLE is the first RL env that combines adversarial red-team dynamics, self-improving curriculum, regulatory distribution shift, and cross-jurisdiction generalization in one coherent task.
+4. **Run it in 30 seconds:** `pip install -r requirements.txt && python main.py full` — or open the dashboard: `python main.py dashboard`.
 
 ---
 
@@ -87,7 +94,7 @@ Architect's only job: keep Executor in this band forever.
 
 ---
 
-## Results (80 Real Episodes — Groq llama-3.1-8b-instant)
+## Results (80 Real Episodes — Groq llama-3.3-70b-versatile)
 
 ### Key Numbers
 
@@ -101,7 +108,7 @@ Architect's only job: keep Executor in this band forever.
 | Regulation shocks fired | 20 · Adaptation rate: **55%** (vs 0% untrained) |
 | Adversarial episodes | 15 (Vendor vs Executor zero-sum) |
 | Cross-jurisdiction | FAR 0.579 · DFARS 0.597 · EU 0.575 |
-| LLM backend | Groq API (`llama-3.1-8b-instant`) |
+| LLM backend | Groq API (`llama-3.3-70b-versatile`) |
 
 ### Plots
 
@@ -163,8 +170,8 @@ python main.py eu
 # Run complete pipeline end-to-end
 python main.py full
 
-# Launch immersive mission-control dashboard (10 panels)
-streamlit run demo/dashboard.py
+# Launch mission-control dashboard (Gradio)
+python main.py dashboard
 
 # Regenerate all plots
 python main.py plots
@@ -317,7 +324,8 @@ crucible/
 │   └── eu_procurement/tasks.py  — 7 static EU Directive tasks [NEW]
 ├── data/episode_logs/      — Episode JSON logs + full_run.json
 ├── demo/
-│   ├── dashboard.py        — 9-panel Streamlit dashboard [UPDATED]
+│   ├── gradio_app.py       — Gradio mission-control dashboard [UPDATED]
+│   ├── dashboard.py        — legacy Streamlit dashboard
 │   └── failure_injector.py — Demo mode
 ├── eval/regression_checker.py
 ├── plots/                  — 8 committed PNG plots
@@ -336,4 +344,4 @@ crucible/
 
 ---
 
-Team: Akarsh Sangisetti & Sarika Jivrajika | Meta PyTorch OpenEnv Hackathon × Scaler | April 25–26, 2026 | Bangalore
+**Team Digital Yudh** — Sangisetti Akarsh & Sarika Jivrajika | Meta PyTorch OpenEnv Hackathon × Scaler | April 25–26, 2026 | Bangalore

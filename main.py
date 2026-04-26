@@ -13,7 +13,7 @@ Commands:
   python main.py episode       — Single standard episode (quick ~30s test)
   python main.py regression    — Check for catastrophic forgetting vs baseline
   python main.py plots         — Regenerate all plots from current episode logs
-  python main.py dashboard     — Launch Streamlit mission-control dashboard
+  python main.py dashboard     — Launch Gradio mission-control dashboard
 """
 
 import os
@@ -107,7 +107,7 @@ def run_eu():
 def run_full_pipeline():
     """Run the complete CRUCIBLE pipeline end-to-end."""
     print("\n=== CRUCIBLE FULL PIPELINE ===")
-    print("Phase 1: Baseline → Phase 2: Train → Phase 3: Architect → Adversarial + Shock\n")
+    print("Phase 1: Baseline -> Phase 2: Train -> Phase 3: Architect -> Adversarial + Shock\n")
 
     from training.grpo_loop import run_phase1_baseline, run_phase2_grpo, run_phase3_architect
     run_phase1_baseline()
@@ -163,11 +163,8 @@ def run_plots():
 
 
 def run_dashboard():
-    root = str(pathlib.Path(__file__).parent)
-    subprocess.run(
-        ["streamlit", "run", str(pathlib.Path(root) / "demo" / "dashboard.py")],
-        cwd=root,
-    )
+    from demo.gradio_app import launch
+    launch()
 
 
 def main():

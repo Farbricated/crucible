@@ -2,30 +2,30 @@
 
 ## Cursor Chat Prompt (new feature/file)
 
-I'm building CRUCIBLE for the OpenEnv Hackathon (Meta PyTorch ◊ Scaler, Bangalore, Apr 25ñ26 2026).
+I'm building CRUCIBLE for the OpenEnv Hackathon (Meta PyTorch ù Scaler, Bangalore, Apr 25ù26 2026).
 
 Context:
 - 4-agent procurement compliance RL env: Executor, Arbiter (frozen), Architect, Vendor
 - Plus a RegulationShock engine that fires mid-episode 30% of the time
 - OpenEnv v0.2.3, FastAPI server, deployed to HuggingFace Spaces
-- DEV: Groq API (llama-3.1-8b-instant, 500K TPD free tier)
+- DEV: Groq API (llama-3.3-70b-versatile, ~100K TPD)
 - SUBMISSION: HF Inference API ($30 credit, llama-3.1-8b-instruct)
 
 Real usage numbers from my Groq logs:
 - 756 requests in 13 hours, 58.2% success, 41.8% rate-limited (429)
 - Avg input: 1,209 tokens | Avg output: 381 tokens
-- Crash hours: 18:00 (176K tokens) and 22:00 (301K tokens) ó both hit 500K TPD ceiling
-- Rate limit is TPD (daily), not TPM ó retry-after is in the error message
+- Crash hours: 18:00 (176K tokens) and 22:00 (301K tokens) ù both hit 500K TPD ceiling
+- Rate limit is TPD (daily), not TPM ù retry-after is in the error message
 
 Task: [DESCRIBE WHAT YOU WANT HERE]
 
 Requirements:
-1. OpenEnv base class (Environment) ó implement reset(), step(), state() only
-2. Client/server separation ó client.py never imports from server/
-3. Static system prompts only ó all dynamic content in user turn
+1. OpenEnv base class (Environment) ù implement reset(), step(), state() only
+2. Client/server separation ù client.py never imports from server/
+3. Static system prompts only ù all dynamic content in user turn
 4. max_tokens: Arbiter=450, Executor=600, Architect=400, Vendor=500
 5. Groq 429 handling: parse exact wait time from error with regex r"try again in ([\d.]+)([sm])", convert to seconds, sleep that exact duration before retry
-6. JSON-only responses from all agents ó "Return JSON only." at end of every system prompt
+6. JSON-only responses from all agents ù "Return JSON only." at end of every system prompt
 7. Pydantic models for all inputs/outputs
 8. For submission mode: swap groq.Groq() for HF Inference API call, same prompt structure
 
@@ -45,7 +45,7 @@ ARBITER_SYSTEM = """Score a procurement compliance analysis on 5 axes.
 
 Weights: correctness=0.35, completeness=0.25, reasoning_transparency=0.20, efficiency=0.10, generalization_signal=0.10
 
-Each axis: float 0.0ñ1.0. Produce weighted_total and a 1-sentence consequence_if_approved.
+Each axis: float 0.0ù1.0. Produce weighted_total and a 1-sentence consequence_if_approved.
 
 Return JSON only:
 {"correctness":0.0,"completeness":0.0,"reasoning_transparency":0.0,"efficiency":0.0,"generalization_signal":0.0,"weighted_total":0.0,"consequence_if_approved":"..."}"""
@@ -59,14 +59,14 @@ Detect violations. Frameworks: FAR, DFARS, EU Directive 2014/24/EU.
 Common violations: expired SAM.gov registration, undisclosed OCI, missing mandatory clauses, ITAR breach, defective cost pricing, debarred vendor, TINA threshold breach.
 
 Return JSON only:
-{"decision":"COMPLIANT|NON-COMPLIANT","violations_found":["FAR X.XXX ó reason"],"reasoning":"...","confidence":0.0}"""
+{"decision":"COMPLIANT|NON-COMPLIANT","violations_found":["FAR X.XXX ù reason"],"reasoning":"...","confidence":0.0}"""
 ```
 
 ### agents/architect.py
 ```python
 ARCHITECT_SYSTEM = """Generate the next compliance training task targeting the agent's weakest axis.
 
-Learning band: 0.45ñ0.70. Last score < 0.45 ? reduce difficulty. Last score > 0.70 ? escalate.
+Learning band: 0.45ù0.70. Last score < 0.45 ? reduce difficulty. Last score > 0.70 ? escalate.
 Escalation: hide violations in boilerplate, chain two conflicting frameworks, correct clause number with wrong threshold, vendor with undisclosed prior violations.
 
 Return JSON only:
@@ -94,7 +94,7 @@ BACKEND = os.getenv("LLM_BACKEND", "groq")  # "groq" | "hf"
 
 groq backend:
 - Use groq.Groq() SDK
-- Model: llama-3.1-8b-instant
+- Model: llama-3.3-70b-versatile
 - On 429: parse wait seconds from error message using re.search(r"try again in ([\d.]+)([sm])", str(e))
   Convert: if unit=="m" multiply by 60. Sleep that exact duration. Retry up to 5 times.
 - Module-level TOKENS_USED = 0, DAILY_LIMIT = 480000 (leave 20K buffer from 500K)

@@ -72,7 +72,7 @@ final_reward = base_score            (weighted 5-axis Arbiter score)
 ```bash
 pip install -r requirements.txt
 python main.py full              # 10-episode 3-phase demo
-streamlit run demo/dashboard.py  # immersive mission-control UI
+python main.py dashboard  # Gradio mission-control UI
 ```
 
 **Pull the environment from HuggingFace:**
@@ -103,4 +103,4 @@ CRUCIBLE is the first open-source RL environment that combines — in a single c
 
 ---
 
-*Built by Akarsh Sangisetti & Sarika Jivrajika · Groq · HuggingFace · OpenEnv 0.2.3*
+*Team Digital Yudh — Sangisetti Akarsh & Sarika Jivrajika · Groq · HuggingFace · OpenEnv 0.2.3*

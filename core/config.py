@@ -22,7 +22,7 @@ LLM_BACKEND: str  = os.getenv("LLM_BACKEND", "groq")
 # Models
 # DEV  (Groq):  8b-instant — fast, low token cost, won't exhaust 480K daily budget
 # SUBMISSION (HF): 70B — better quality, separate HF credits, set LLM_BACKEND=hf
-GROQ_MODEL: str   = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+GROQ_MODEL: str   = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 HF_MODEL: str     = os.getenv("HF_MODEL", "meta-llama/Llama-3.1-70B-Instruct")
 
 # Daily token budget (Groq free tier = 500K/day; leave 20K buffer)

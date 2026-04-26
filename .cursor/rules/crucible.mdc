@@ -24,7 +24,7 @@ Agents: Executor, Arbiter, Architect, Vendor + RegulationShock engine.
 ## LLM backend — TWO modes, never mix them up
 
 ### DEV mode (local, uses Groq free tier)
-- Model: llama-3.1-8b-instant via groq SDK
+- Model: llama-3.3-70b-versatile via groq SDK
 - Hard limit: 500K tokens/day free tier (your logs show you hit this at 18:00 and 22:00)
 - Real numbers from your logs: avg 1,209 input tokens, avg 381 output tokens, 58.2% success rate, 41.8% 429s
 - Rate limit type: TPD (tokens per day) — NOT TPM. Parse retry-after from error with: re.search(r"try again in ([\d.]+)([sm])", err)

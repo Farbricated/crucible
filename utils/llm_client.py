@@ -31,7 +31,7 @@ HF_TOKEN = os.getenv("HF_TOKEN", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 LLM_BACKEND = os.getenv("LLM_BACKEND", "auto")  # auto | groq | hf | anthropic
 
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # HF model — change to 70B for higher quality if budget allows
 HF_MODEL = os.getenv(

@@ -2,7 +2,7 @@
 
 *A self-improving RL environment for procurement compliance — with adversarial red-teaming, mid-episode regulatory shocks, and cross-jurisdiction generalization*
 
-*Akarsh Sangisetti & Sarika Jivrajika | OpenEnv Hackathon × Scaler × Meta PyTorch | April 2026*
+*Team Digital Yudh — Sangisetti Akarsh & Sarika Jivrajika | OpenEnv Hackathon × Scaler × Meta PyTorch | April 2026*
 
 ---
 
@@ -199,7 +199,7 @@ This makes the environment's stakes tangible. Judges can follow the story.
 - **Tracking:** Weights & Biases — real reward curves and training metrics
 - **Environment:** OpenEnv-compliant FastAPI server (reset/step/state endpoints)
 - **Deployment:** HuggingFace Spaces via `openenv push`
-- **Dashboard:** Streamlit — 9 panels including adversarial arms race, shock adaptation, jurisdiction comparison
+- **Dashboard:** Gradio — mission-control view including reward curves, run logs, and backend budget status
 
 ---
 
@@ -230,19 +230,34 @@ python main.py shock
 python main.py eu
 
 # Dashboard
-streamlit run demo/dashboard.py
+python main.py dashboard
 ```
+
+---
+
+## Why It Matters
+
+Procurement fraud costs the US Department of Defense an estimated **$36 billion annually** — roughly 10% of the entire DoD procurement budget. Contracting officers review thousands of documents per year with no AI assistance. A single missed FAR violation can void a multi-million dollar contract, trigger Inspector General referrals, or worse.
+
+CRUCIBLE is the first RL environment that:
+1. **Never saturates** — the curriculum grows with the agent
+2. **Teaches adversarial robustness** — the agent trains against an active attacker, not just static cases
+3. **Tests regulatory distribution shift** — the agent must adapt when the rules change mid-task
+4. **Generalizes across jurisdictions** — one model, US FAR/DFARS *and* EU procurement law
+
+The same architecture applies to medical device compliance, financial regulation, tax law, and any domain where rules are dense, adversaries are motivated, and mistakes are expensive.
+
+The environment has no ceiling. Neither does the agent.
 
 ---
 
 ## Links
 
-- **HuggingFace Space:** `https://YOUR_USERNAME-crucible-env.hf.space`
-- **Training Notebook:** `crucible_env/training/crucible_grpo.ipynb`
-- **GitHub / HF Repo:** See submission URL
-- **W&B Run:** (link after training)
+- **HuggingFace Space (live env):** [`spaces/Flake56/crucible-env`](https://huggingface.co/spaces/Flake56/crucible-env)
+- **Training Notebook:** [`crucible_env/training/crucible_grpo.ipynb`](crucible_env/training/crucible_grpo.ipynb)
+- **GitHub Repo:** See HuggingFace Space submission
 
 ---
 
 *Built at the OpenEnv Hackathon, Bangalore, April 25–26, 2026.*
-*Team: Akarsh Sangisetti & Sarika Jivrajika*
+*Team Digital Yudh — [Sangisetti Akarsh](https://huggingface.co/Flake56) & [Sarika Jivrajika](https://huggingface.co/False45)*

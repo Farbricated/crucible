@@ -81,7 +81,7 @@ final_reward = base_score           (5-axis Arbiter, weighted)
 
 ## Results: +78% Reward Improvement over 80 Real Episodes
 
-We ran 80 real episodes using Groq (`llama-3.1-8b-instant`) as the LLM backend:
+We ran 80 real episodes using Groq (`llama-3.3-70b-versatile`) as the LLM backend:
 
 | Metric | Value |
 |---|---|
@@ -136,7 +136,7 @@ https://huggingface.co/spaces/Flake56/crucible-env
 ```bash
 pip install -r requirements.txt
 python main.py full        # 10-episode 3-phase run
-streamlit run demo/dashboard.py   # mission-control UI
+python main.py dashboard   # Gradio mission-control UI
 ```
 
 **Training notebook (Colab):**
@@ -163,7 +163,7 @@ print(f"Reward: {result.reward:.3f}")
 
 ## GitHub
 
-Full source, plots, training logs, and the Streamlit dashboard at:
+Full source, plots, training logs, and the Gradio dashboard at:
 [https://github.com/Flake56/crucible](https://github.com/Flake56/crucible)
 
-*Built by Akarsh Sangisetti & Sarika Jivrajika — OpenEnv Hackathon 2026*
+*Team Digital Yudh — [Sangisetti Akarsh](https://huggingface.co/Flake56) & [Sarika Jivrajika](https://huggingface.co/False45) | OpenEnv Hackathon 2026*
