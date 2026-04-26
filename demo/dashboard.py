@@ -5,16 +5,54 @@ Run: streamlit run demo/dashboard.py
 
 import json
 import os
+import sys
 import time
+import subprocess
+import threading
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 
-LOG_DIR  = "data/episode_logs"
-FULL_LOG = os.path.join(LOG_DIR, "full_run.json")
+LOG_DIR   = "data/episode_logs"
+FULL_LOG  = os.path.join(LOG_DIR, "full_run.json")
 PLOTS_DIR = "plots"
+
+# Resolve project root so subprocess calls work from any cwd
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+COMMANDS = {
+    "⚡ Single Episode":   ("episode",    "Run one compliance episode (quick test ~30 s)"),
+    "📊 Baseline Run":     ("baseline",   "Phase 1 — 10 episodes, no curriculum (1–2 min)"),
+    "🦹 Adversarial":      ("adversarial","Vendor crafts hidden violations, Executor must catch"),
+    "⚡ Shock Episode":    ("shock",      "Mid-episode regulation change injected"),
+    "🇪🇺 EU Jurisdiction": ("eu",         "Test cross-jurisdiction with EU Directive 2014/24/EU"),
+    "🔥 Full Pipeline":    ("full",       "Baseline + train + architect + adv + shock (5–8 min)"),
+    "📈 Regenerate Plots": ("plots",      "Rebuild all plots/ from current episode logs"),
+}
+
+
+def _run_command_streaming(cmd_arg: str, output_lines: list, done_flag: list):
+    """Run `python main.py <cmd_arg>` in the project root, append stdout lines."""
+    env = os.environ.copy()
+    env["PYTHONPATH"] = _ROOT
+    proc = subprocess.Popen(
+        [sys.executable, "main.py", cmd_arg],
+        cwd=_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+        env=env,
+    )
+    for line in proc.stdout:
+        output_lines.append(line.rstrip())
+        if len(output_lines) > 300:
+            output_lines.pop(0)
+    proc.wait()
+    done_flag.append(proc.returncode)
+
 
 st.set_page_config(
     page_title="CRUCIBLE — Mission Control",
@@ -116,6 +154,17 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ── Session state initialisation ─────────────────────────────
+for _k, _v in {
+    "running": False,
+    "output_lines": [],
+    "done_flag": [],
+    "active_cmd": "",
+    "last_exit": None,
+}.items():
+    if _k not in st.session_state:
+        st.session_state[_k] = _v
+
 # ── Sidebar ───────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ Controls")
@@ -126,18 +175,75 @@ with st.sidebar:
             f"<script>setTimeout(()=>window.location.reload(),{refresh_sec*1000})</script>",
             unsafe_allow_html=True,
         )
-    if st.button("🔄 Refresh Now"):
+    if st.button("🔄 Refresh Data"):
+        st.cache_data.clear()
         st.rerun()
 
     st.divider()
-    st.markdown("### ▶ Quick Run")
-    st.code("python main.py baseline\npython main.py adversarial\npython main.py shock\npython main.py full", language="bash")
+    st.markdown("### ▶ Run Commands")
+
+    # Check if a background job just finished
+    if st.session_state.running and st.session_state.done_flag:
+        st.session_state.last_exit = st.session_state.done_flag[0]
+        st.session_state.running = False
+        st.cache_data.clear()
+
+    if st.session_state.running:
+        st.markdown(
+            f'<div style="color:#e3b341;font-size:0.85rem;padding:6px 0">'
+            f'⏳ Running: <b>{st.session_state.active_cmd}</b></div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("🛑 Stop", use_container_width=True):
+            st.session_state.running = False
+            st.session_state.output_lines.append("— stopped by user —")
+    else:
+        if st.session_state.last_exit is not None:
+            color = "#3fb950" if st.session_state.last_exit == 0 else "#f85149"
+            label = "✅ Finished" if st.session_state.last_exit == 0 else f"❌ Exit {st.session_state.last_exit}"
+            st.markdown(
+                f'<div style="color:{color};font-size:0.82rem;padding-bottom:6px">{label}</div>',
+                unsafe_allow_html=True,
+            )
+
+        for btn_label, (cmd_arg, tooltip) in COMMANDS.items():
+            if st.button(btn_label, use_container_width=True, help=tooltip,
+                         disabled=st.session_state.running):
+                st.session_state.output_lines = [f"$ python main.py {cmd_arg}"]
+                st.session_state.done_flag = []
+                st.session_state.running = True
+                st.session_state.active_cmd = cmd_arg
+                st.session_state.last_exit = None
+                t = threading.Thread(
+                    target=_run_command_streaming,
+                    args=(cmd_arg,
+                          st.session_state.output_lines,
+                          st.session_state.done_flag),
+                    daemon=True,
+                )
+                t.start()
+                st.rerun()
+
+        if st.session_state.output_lines:
+            if st.button("🗑 Clear Log", use_container_width=True):
+                st.session_state.output_lines = []
+                st.session_state.last_exit = None
+
+    # Live terminal output in sidebar
+    if st.session_state.output_lines:
+        st.divider()
+        st.markdown("### 🖥 Live Output")
+        output_text = "\n".join(st.session_state.output_lines[-60:])
+        st.code(output_text, language="bash")
+        if st.session_state.running:
+            time.sleep(1)
+            st.rerun()
 
     st.divider()
     st.markdown("### 🔗 Links")
     st.markdown("[Groq Usage Console](https://console.groq.com/usage)")
-    st.markdown("[HuggingFace Space](#)")
-    st.markdown("[GitHub Repo](#)")
+    st.markdown("[HuggingFace Space](https://huggingface.co/spaces/Flake56/crucible-env)")
+    st.markdown("[Live API Docs](https://Flake56-crucible-env.hf.space/docs)")
 
 # ── Load data ─────────────────────────────────────────────────
 @st.cache_data(ttl=5)
