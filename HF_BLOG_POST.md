@@ -21,6 +21,17 @@ At the same time, procurement fraud costs the US DoD an estimated $50 billion pe
 
 We asked: **what would it take to build an RL environment where the difficulty always stays one step ahead of the agent?**
 
+### No Prior RL Env Combines These
+
+| Feature | SWE-bench | WebArena | ALFWorld | **CRUCIBLE** |
+|---|---|---|---|---|
+| Self-improving curriculum | ❌ | ❌ | ❌ | **✅ Architect** |
+| Adversarial agent | ❌ | ❌ | ❌ | **✅ Vendor** |
+| Mid-episode distribution shift | ❌ | ❌ | ❌ | **✅ Reg. Shocks** |
+| Multi-jurisdiction | ❌ | ❌ | ❌ | **✅ FAR+DFARS+EU** |
+| Counterfactual consequences | ❌ | ❌ | ❌ | **✅ Arbiter** |
+| Task ceiling | Fixed | Fixed | Fixed | **∞ No ceiling** |
+
 ---
 
 ## The Solution: Four Interlocking Agents

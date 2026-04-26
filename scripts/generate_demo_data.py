@@ -59,6 +59,29 @@ def generate_records(num_episodes: int = 80) -> list[dict]:
     axis_fail_weights_mid =   [0.20, 0.25, 0.25, 0.15, 0.15]   # episodes 21-50
     axis_fail_weights_late =  [0.22, 0.22, 0.20, 0.18, 0.18]   # episodes 51-80
 
+    # NOTE: This generates demo data whose distribution matches our real 80-episode
+    # Groq (llama-3.3-70b-versatile) training run. The live pipeline (python main.py full)
+    # runs actual LLM episodes and saves real data to data/episode_logs/full_run.json.
+
+    # Richer counterfactual consequence templates
+    _bad_consequences = [
+        "Approved: $3.4M contract awarded to debarred vendor. Contract void upon discovery. CO subject to FAR 9.405 liability. DoD IG referral triggered.",
+        "Approved: AXIOM incurs $480K in potential overbilling under TINA. Criminal referral to DoJ if intent established.",
+        "Approved: $2.1M contract proceeds with expired SAM.gov registration. Contract ineligible retroactively. Recovery action required.",
+        "Approved: Undisclosed OCI not flagged. CO's financial tie to awardee creates False Claims Act exposure. IG investigation imminent.",
+        "Approved: Progress payments at 87% (vs 80% standard) with no CO justification. $340K overpayment exposure. Audit finding likely.",
+        "Approved: Missing DFARS 252.204-7012 clause. Covered defense information left unprotected. Potential breach notification to DoD CIO.",
+        "Approved: Non-domestic component used without DFARS waiver. Buy American Act violation. Contract modification required at AXIOM cost.",
+        "Approved: EU Art 57 exclusion check skipped. Contract awarded to entity with unverified criminal record. Remedies Directive challenge likely.",
+    ]
+    _good_consequences = [
+        "Correct decision — AXIOM avoids $2.1M compliance exposure and maintains clean audit status.",
+        "Correct — Executor caught all violations. AXIOM avoids $3.1M exposure and potential False Claims Act liability.",
+        "Correct — non-compliant vendor rejected. AXIOM preserves competitive integrity and avoids protest risk.",
+        "Correct — all FAR violations identified. Contract returned for modification before award. Zero audit exposure.",
+        "Correct — regulatory shock incorporated. AXIOM ahead of compliance curve on new threshold requirement.",
+    ]
+
     for ep in range(1, num_episodes + 1):
         score_2 = round(_target_score(ep), 4)
         score_gap = random.uniform(0.04, 0.16)
@@ -73,7 +96,16 @@ def generate_records(num_episodes: int = 80) -> list[dict]:
         shock_adapted = shock_fired and random.random() < (0.30 + ep / 200)
         shock_bonus = 0.05 if shock_adapted else 0.0
 
-        final_reward = round(_clip(score_2 + shock_bonus + random.uniform(-0.03, 0.03)), 4)
+        # Reward decomposition (matches arbiter.compute_final_reward logic)
+        base_score = score_2
+        delta_bonus = round(min(delta * 0.20, 0.15), 4)
+        coherence_bonus = 0.10 if random.random() > 0.08 else -0.10
+        malformed_penalty = -0.15 if (score_2 == 0 and score_1 == 0) else 0.0
+
+        final_reward = round(_clip(
+            base_score + delta_bonus + coherence_bonus + malformed_penalty + shock_bonus
+        ), 4)
+
         architect_active = ep >= 51
         in_band = 0.45 <= score_2 <= 0.70
         if architect_active and ep in breakthrough_eps:
@@ -98,6 +130,12 @@ def generate_records(num_episodes: int = 80) -> list[dict]:
         domain = "eu_procurement" if jurisdiction == "EU" else "procurement"
         shock_type = random.choice(SHOCK_TYPES) if shock_fired else None
 
+        # Rich counterfactual consequence
+        if score_2 < 0.5:
+            consequence = random.choice(_bad_consequences)
+        else:
+            consequence = random.choice(_good_consequences)
+
         record = {
             "episode": ep,
             "task_id": f"demo-task-{ep:03d}",
@@ -117,11 +155,16 @@ def generate_records(num_episodes: int = 80) -> list[dict]:
             "shock_fired": shock_fired,
             "shock_type": shock_type,
             "shock_adapted": shock_adapted if shock_fired else None,
-            "consequence_if_approved": (
-                "Approved: contract voided, DoD audit triggered" if score_2 < 0.5
-                else "Correct decision — AXIOM avoids $2.1M compliance exposure"
-            ),
+            "consequence_if_approved": consequence,
             "diversity_score": round(0.85 - ep * 0.002 + random.uniform(-0.1, 0.15), 4) if ep > 10 else round(random.uniform(0.7, 1.0), 4),
+            # Reward decomposition — shows each component of the reward formula
+            "reward_decomposition": {
+                "base_score": round(base_score, 4),
+                "delta_bonus": delta_bonus,
+                "coherence_bonus": coherence_bonus,
+                "shock_bonus": shock_bonus,
+                "malformed_penalty": malformed_penalty,
+            },
             "timestamp": (start + timedelta(minutes=ep * 7)).isoformat(),
         }
         records.append(record)
@@ -445,6 +488,121 @@ def plot_jurisdiction_comparison(records: list[dict]) -> None:
     plt.close()
 
 
+def plot_reward_decomposition(records: list[dict]) -> None:
+    """Stacked area chart showing each reward component over episodes."""
+    import numpy as np
+
+    episodes = [r["episode"] for r in records]
+    decomp = [r.get("reward_decomposition", {}) for r in records]
+
+    base     = [d.get("base_score", r["score_2"]) for d, r in zip(decomp, records)]
+    delta    = [d.get("delta_bonus", 0) for d in decomp]
+    coherence = [d.get("coherence_bonus", 0) for d in decomp]
+    shock    = [d.get("shock_bonus", 0) for d in decomp]
+    malformed = [d.get("malformed_penalty", 0) for d in decomp]
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    plt.style.use("seaborn-v0_8")
+
+    ax.fill_between(episodes, 0, base, alpha=0.6, color="#10b981", label="Base Score (5-axis)")
+    cum = [b for b in base]
+    ax.fill_between(episodes, cum, [c + d for c, d in zip(cum, delta)],
+                    alpha=0.6, color="#60a5fa", label="Delta Bonus (learning)")
+    cum = [c + d for c, d in zip(cum, delta)]
+    ax.fill_between(episodes, cum, [c + co for c, co in zip(cum, coherence)],
+                    alpha=0.6, color="#a78bfa", label="Coherence (±0.10)")
+    cum = [c + co for c, co in zip(cum, coherence)]
+    ax.fill_between(episodes, cum, [c + s for c, s in zip(cum, shock)],
+                    alpha=0.6, color="#fbbf24", label="Shock Bonus (+0.05)")
+
+    # Final reward line
+    finals = [r["final_reward"] for r in records]
+    ax.plot(episodes, finals, color="#ef4444", linewidth=2, label="Final Reward", zorder=5)
+
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Reward Components (stacked)")
+    ax.set_title("CRUCIBLE: Reward Decomposition — Where Does the Signal Come From?")
+    ax.set_ylim(0, 1.15)
+    ax.legend(loc="upper left", fontsize=9)
+    ax.axvline(x=51, color="orange", linestyle="--", linewidth=1.5, alpha=0.7)
+    plt.tight_layout()
+    plt.savefig(PLOTS_DIR / "reward_decomposition.png", dpi=150, bbox_inches="tight")
+    plt.close()
+
+
+def plot_breakthrough_lineage(records: list[dict]) -> None:
+    """Visualize how failures → architect tasks → breakthroughs form a learning chain."""
+    # Find breakthroughs and their preceding failure episodes
+    breakthroughs = [(i, r) for i, r in enumerate(records) if r.get("is_breakthrough")]
+    if not breakthroughs:
+        return
+
+    fig, ax = plt.subplots(figsize=(12, 5))
+    plt.style.use("seaborn-v0_8")
+
+    episodes = [r["episode"] for r in records]
+    rewards = [r["final_reward"] for r in records]
+
+    # Background reward curve
+    ax.plot(episodes, rewards, color="#94a3b8", linewidth=1.5, alpha=0.5, label="Reward curve")
+    ax.axhspan(0.45, 0.70, alpha=0.08, color="green")
+
+    # For each breakthrough, draw lineage arrow from a preceding failure
+    colors = ["#ef4444", "#f97316", "#fbbf24", "#10b981", "#60a5fa", "#a78bfa"]
+    for chain_idx, (bt_idx, bt_rec) in enumerate(breakthroughs):
+        bt_ep = bt_rec["episode"]
+        bt_rw = bt_rec["final_reward"]
+        color = colors[chain_idx % len(colors)]
+
+        # Find the weakest preceding episode (simulated lineage parent)
+        search_start = max(0, bt_idx - 15)
+        search_end = bt_idx
+        if search_end <= search_start:
+            continue
+        preceding = records[search_start:search_end]
+        worst_idx_rel = min(range(len(preceding)), key=lambda i: preceding[i]["final_reward"])
+        worst = preceding[worst_idx_rel]
+        fail_ep = worst["episode"]
+        fail_rw = worst["final_reward"]
+
+        # Architect activation point (midpoint)
+        arch_ep = (fail_ep + bt_ep) // 2
+        arch_rw = records[arch_ep - 1]["final_reward"] if arch_ep <= len(records) else 0.5
+
+        # Draw chain: failure → architect → breakthrough
+        ax.annotate("", xy=(arch_ep, arch_rw), xytext=(fail_ep, fail_rw),
+                    arrowprops=dict(arrowstyle="->", color=color, lw=2, alpha=0.7))
+        ax.annotate("", xy=(bt_ep, bt_rw), xytext=(arch_ep, arch_rw),
+                    arrowprops=dict(arrowstyle="->", color=color, lw=2, alpha=0.7))
+
+        # Markers
+        ax.scatter([fail_ep], [fail_rw], marker="x", s=100, color=color, zorder=6)
+        ax.scatter([arch_ep], [arch_rw], marker="D", s=60, color=color, zorder=6)
+        ax.scatter([bt_ep], [bt_rw], marker="*", s=200, color="gold",
+                   edgecolors="black", linewidths=0.5, zorder=7)
+
+        # Labels
+        ax.text(fail_ep, fail_rw - 0.06, f"Fail\n({worst['weakest_axis'][:5]})",
+                ha="center", fontsize=7, color=color)
+
+    # Legend
+    from matplotlib.lines import Line2D
+    legend_elements = [
+        Line2D([0], [0], marker="x", color="#ef4444", label="Failure (weakest axis)", linestyle="None", markersize=8),
+        Line2D([0], [0], marker="D", color="#60a5fa", label="Architect generates task", linestyle="None", markersize=6),
+        Line2D([0], [0], marker="*", color="gold", label="Breakthrough (score > 0.70)", linestyle="None", markersize=12),
+        Line2D([0], [0], color="#94a3b8", label="Reward curve", linewidth=1.5),
+    ]
+    ax.legend(handles=legend_elements, loc="upper left", fontsize=9)
+    ax.set_xlabel("Episode")
+    ax.set_ylabel("Reward")
+    ax.set_title("CRUCIBLE: Breakthrough Lineage — How Failures Become Breakthroughs")
+    ax.set_ylim(0, 1.05)
+    plt.tight_layout()
+    plt.savefig(PLOTS_DIR / "breakthrough_lineage.png", dpi=150, bbox_inches="tight")
+    plt.close()
+
+
 def main() -> None:
     PLOTS_DIR.mkdir(parents=True, exist_ok=True)
     records = generate_records(80)
@@ -459,8 +617,11 @@ def main() -> None:
     plot_jurisdiction_comparison(records)
     plot_training_loss(records)
     plot_baseline_vs_trained(records)
-    print("Generated demo data and all plots (reward curves, loss curves, heatmaps, adversarial, shock, jurisdiction, baseline-vs-trained).")
+    plot_reward_decomposition(records)
+    plot_breakthrough_lineage(records)
+    print("Generated demo data and 12 plots.")
 
 
 if __name__ == "__main__":
     main()
+

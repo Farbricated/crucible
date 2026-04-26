@@ -86,7 +86,41 @@ obs = env.reset()
 
 ---
 
-## Slide 6 — Why It Matters
+## Slide 6 — Prior Work: Why CRUCIBLE is Novel
+
+| Feature | SWE-bench | WebArena | ALFWorld | **CRUCIBLE** |
+|---|---|---|---|---|
+| Self-improving curriculum | ❌ | ❌ | ❌ | **✅ Architect** |
+| Adversarial agent | ❌ | ❌ | ❌ | **✅ Vendor** |
+| Mid-episode distribution shift | ❌ | ❌ | ❌ | **✅ Reg. Shocks** |
+| Multi-jurisdiction | ❌ | ❌ | ❌ | **✅ FAR+DFARS+EU** |
+| Counterfactual consequences | ❌ | ❌ | ❌ | **✅ Arbiter** |
+| Multi-axis scoring | ❌ | Binary | Binary | **✅ 5-axis** |
+| Task ceiling | Fixed | Fixed | Fixed | **∞ No ceiling** |
+
+---
+
+## Slide 7 — Episode Walkthrough (Before vs After)
+
+### 🔴 Episode 3 (Untrained Executor)
+> **Task:** Review vendor bid from TechForce LLC (AXIOM-7731, $2.4M)  
+> **Executor output:** "NON-COMPLIANT — the vendor appears to have issues."  
+> **Arbiter:** Score 0.31 — *"No FAR citations. No specific violation identified. Reasoning opaque."*  
+> **Consequence:** *"Approved: $2.4M awarded to vendor with SB gap. DoD audit triggered."*  
+> **Weakest axis:** `reasoning_transparency`
+
+### 🟢 Episode 75 (Trained + Architect + Shocks)
+> **Task:** Architect-generated task targeting `reasoning_transparency` with hidden CAS threshold violation  
+> **Executor output:** "NON-COMPLIANT — (1) CAS disclosure outdated per 48 CFR 9903.202-3 ($50M threshold breached), (2) Progress payment rate 85% exceeds FAR 52.232-16 standard of 80% with no CO justification, (3) Verbal subcontract consent violates FAR 52.244-2 written requirement."  
+> **Arbiter:** Score 0.78 — *"All three violations caught with correct FAR citations."*  
+> **Consequence:** *"Correct — AXIOM avoids $3.1M compliance exposure."*  
+> **⚡ Shock adapted:** YES — incorporated new TINA threshold change mid-episode
+
+**Result: 0.31 → 0.78 (+152%). Agent learned to cite specific FAR clauses, catch multiple violations, and adapt to regulatory shocks.**
+
+---
+
+## Slide 8 — Why It Matters
 
 **Procurement fraud costs the US DoD an estimated $50B+ per year.**
 Every static compliance tool ages the moment regulations change.

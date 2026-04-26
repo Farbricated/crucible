@@ -178,6 +178,60 @@ Axis × difficulty heatmap — exactly what the Architect uses to target its nex
 
 ---
 
+## Episode Walkthrough: Before vs After
+
+Numbers convince, but seeing the Executor's actual behavior is unforgettable.
+
+### 🔴 Episode 3 (Cold-Start, No Training)
+
+**Task:** Review vendor bid from TechForce LLC for AXIOM-7731 ($2.4M avionics supply contract).
+
+**Executor response (Attempt 1):**
+```json
+{
+  "decision": "NON-COMPLIANT",
+  "reasoning": "The vendor appears to have issues with their bid.",
+  "violations_found": [],
+  "confidence": 0.3
+}
+```
+
+**Arbiter Score: 0.31** — *"Correct classification but no FAR citations. No specific violation identified. Reasoning is opaque. A contracting officer cannot act on this analysis."*
+
+**Consequence:** *"If approved: $2.4M contract awarded despite SB subcontracting gap (8% actual vs 23% committed). DoD audit triggered. Potential False Claims Act exposure."*
+
+**Weakest axis:** `reasoning_transparency` (0.12)
+
+---
+
+### 🟢 Episode 75 (After Training + Architect + Shocks)
+
+**Task:** Architect-generated task targeting `reasoning_transparency` — contract modification with hidden CAS threshold violation.
+
+**Executor response (Attempt 1):**
+```json
+{
+  "decision": "NON-COMPLIANT",
+  "reasoning": "Three FAR violations identified: (1) CAS disclosure statement outdated per 48 CFR 9903.202-3 — modification pushes CAS-covered portfolio above $50M threshold, requiring disclosure update. (2) Progress payment rate at 85% exceeds FAR 52.232-16 standard rate of 80% with no documented CO justification. (3) Verbal subcontract consent for $1.8M DataFlow Analytics sub violates FAR 52.244-2 written consent requirement for subcontracts exceeding $150K.",
+  "violations_found": [
+    "48 CFR 9903.202-3 — CAS disclosure not updated after $50M threshold breach",
+    "FAR 52.232-16 — Progress payment rate 85% above 80% standard without justification",
+    "FAR 52.244-2 — Verbal consent instead of required written CO consent for $1.8M subcontract"
+  ],
+  "confidence": 0.92
+}
+```
+
+**Arbiter Score: 0.78** — *"All three violations correctly identified with accurate FAR clause citations. Reasoning is transparent and actionable."*
+
+**⚡ Regulation Shock:** Mid-episode TINA threshold change (FAR 15.403-4 raised from $2M to $2.5M). **Executor adapted:** YES — incorporated new threshold into analysis.
+
+**Consequence:** *"Correct — AXIOM avoids $3.1M compliance exposure and maintains clean audit status."*
+
+**Result: 0.31 → 0.78 (+152%). The agent learned to cite specific FAR clauses, catch multiple violations simultaneously, and adapt to mid-episode regulatory changes.**
+
+---
+
 ## Counterfactual Consequences
 
 Every Arbiter score includes a `consequence_if_approved` field — a simulation of what happens to AXIOM if the Executor's decision stands:

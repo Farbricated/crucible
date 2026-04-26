@@ -209,6 +209,11 @@ class EpisodeRunner:
         self.diversity_scores.append(diversity_score)
 
         # ── METRICS ─────────────────────────────────────────────
+        # Compute reward decomposition for transparency
+        _delta_bonus = round(min((score_2.weighted_total - score_1.weighted_total) * 0.20, 0.15), 4)
+        _coherence_bonus = 0.10 if world_coherent_2 else -0.10
+        _malformed = -0.15 if (score_2.weighted_total == 0 and score_2.correctness == 0) else 0.0
+
         record = {
             "episode": self.episode_count,
             "task_id": task.task_id,
@@ -229,6 +234,13 @@ class EpisodeRunner:
             "vendor_reward": vendor_score.vendor_reward if vendor_score else None,
             "consequence_if_approved": score_2.consequence_if_approved,
             "diversity_score": diversity_score,
+            "reward_decomposition": {
+                "base_score": round(score_2.weighted_total, 4),
+                "delta_bonus": _delta_bonus,
+                "coherence_bonus": _coherence_bonus,
+                "shock_bonus": 0.05 if shock_adapted else 0.0,
+                "malformed_penalty": _malformed,
+            },
             "llm_backend": _backend(),
             "llm_model": active_backend(),
             "timestamp": datetime.now().isoformat(),
