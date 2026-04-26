@@ -209,7 +209,7 @@ class EpisodeRunner:
         self.diversity_scores.append(diversity_score)
 
         # ── METRICS ─────────────────────────────────────────────
-        self.reward_history.append({
+        record = {
             "episode": self.episode_count,
             "task_id": task.task_id,
             "domain": task.domain,
@@ -232,7 +232,9 @@ class EpisodeRunner:
             "llm_backend": _backend(),
             "llm_model": active_backend(),
             "timestamp": datetime.now().isoformat(),
-        })
+        }
+        self.reward_history.append(record)
+        self._append_full_log(record)
 
         summary = {
             "episode_id": episode_id,
@@ -280,6 +282,20 @@ class EpisodeRunner:
         path = os.path.join(LOG_DIR, f"{entry.episode_id}.json")
         with open(path, "w") as f:
             f.write(entry.model_dump_json(indent=2))
+
+    def _append_full_log(self, record: dict):
+        """Incrementally append one record to full_run.json after every episode."""
+        path = os.path.join(LOG_DIR, "full_run.json")
+        try:
+            existing: list = []
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    existing = json.load(f)
+            existing.append(record)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(existing, f, indent=2)
+        except Exception as exc:
+            print(f"[warn] Could not append to full_run.json: {exc}")
 
     def get_metrics_summary(self) -> dict:
         if not self.reward_history:

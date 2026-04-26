@@ -141,7 +141,7 @@ Cross-jurisdiction generalization: same Executor on US FAR/DFARS vs EU Directive
 
 ```bash
 pip install -r requirements.txt
-export ANTHROPIC_API_KEY=your_key
+export GROQ_API_KEY=your_groq_key   # get free key at console.groq.com
 
 # Run a single standard episode
 python main.py episode

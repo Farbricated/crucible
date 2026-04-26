@@ -33,6 +33,9 @@ COMMANDS = {
 }
 
 
+_active_proc: list = []  # holds the single Popen object so Stop can kill it
+
+
 def _run_command_streaming(cmd_arg: str, output_lines: list, done_flag: list):
     """Run `python main.py <cmd_arg>` in the project root, append stdout lines."""
     env = os.environ.copy()
@@ -46,11 +49,14 @@ def _run_command_streaming(cmd_arg: str, output_lines: list, done_flag: list):
         bufsize=1,
         env=env,
     )
+    _active_proc.clear()
+    _active_proc.append(proc)
     for line in proc.stdout:
         output_lines.append(line.rstrip())
         if len(output_lines) > 300:
             output_lines.pop(0)
     proc.wait()
+    _active_proc.clear()
     done_flag.append(proc.returncode)
 
 
@@ -161,6 +167,7 @@ for _k, _v in {
     "done_flag": [],
     "active_cmd": "",
     "last_exit": None,
+    "proc_pid": None,
 }.items():
     if _k not in st.session_state:
         st.session_state[_k] = _v
@@ -195,6 +202,16 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
         if st.button("🛑 Stop", use_container_width=True):
+            if _active_proc:
+                try:
+                    _active_proc[0].terminate()
+                    _active_proc[0].wait(timeout=3)
+                except Exception:
+                    try:
+                        _active_proc[0].kill()
+                    except Exception:
+                        pass
+                _active_proc.clear()
             st.session_state.running = False
             st.session_state.output_lines.append("— stopped by user —")
     else:
@@ -248,10 +265,27 @@ with st.sidebar:
 # ── Load data ─────────────────────────────────────────────────
 @st.cache_data(ttl=5)
 def load_log():
-    if not os.path.exists(FULL_LOG):
-        return []
-    with open(FULL_LOG) as f:
-        return json.load(f)
+    """Load full_run.json; if absent/empty, reconstruct from per-episode files."""
+    if os.path.exists(FULL_LOG):
+        try:
+            with open(FULL_LOG, encoding="utf-8") as f:
+                data = json.load(f)
+            if data:
+                return data
+        except Exception:
+            pass
+    # Fallback: stitch together individual ep-*.json files
+    records = []
+    if os.path.exists(LOG_DIR):
+        for fn in sorted(os.listdir(LOG_DIR)):
+            if fn.startswith("ep_") and fn.endswith(".json") and fn != "full_run.json":
+                try:
+                    with open(os.path.join(LOG_DIR, fn), encoding="utf-8") as f:
+                        records.append(json.load(f))
+                except Exception:
+                    pass
+    return records
+
 
 @st.cache_data(ttl=5)
 def load_episodes():
@@ -261,18 +295,25 @@ def load_episodes():
     for fn in sorted(os.listdir(LOG_DIR)):
         if fn.startswith("ep-") and fn.endswith(".json"):
             try:
-                with open(os.path.join(LOG_DIR, fn)) as f:
+                with open(os.path.join(LOG_DIR, fn), encoding="utf-8") as f:
                     eps.append(json.load(f))
             except Exception:
                 pass
     return eps
+
+
+def _safe_str(val, default: str = "?", maxlen: int = 0) -> str:
+    """Return val as a string, never None; optionally truncate."""
+    s = str(val) if val is not None else default
+    return s[:maxlen] if maxlen else s
+
 
 history  = load_log()
 episodes = load_episodes()
 
 # ── LLM backend info ──────────────────────────────────────────
 try:
-    from utils.llm_client import active_backend, backend_info, get_call_stats
+    from utils.llm_client import backend_info, get_call_stats
     _binfo  = backend_info()
     _stats  = get_call_stats()
     _groq_calls   = _stats["groq"]["calls"]
@@ -330,11 +371,12 @@ if history:
     last = history[-1]
     ticker_items = []
     for r in history[-8:]:
-        ep   = r.get("episode", "?")
-        rwd  = r.get("final_reward", 0)
-        jur  = r.get("jurisdiction", "FAR")
-        axis = r.get("weakest_axis", "?")[:12]
-        ticker_items.append(f"► ep-{ep:04d} reward={rwd:.3f} [{jur}] weak={axis}")
+        ep   = r.get("episode", 0)
+        rwd  = float(r.get("final_reward", 0) or 0)
+        jur  = _safe_str(r.get("jurisdiction", "FAR"))
+        axis = _safe_str(r.get("weakest_axis"), "?", maxlen=12)
+        ep_fmt = f"{int(ep):04d}" if str(ep).isdigit() or isinstance(ep, int) else str(ep)
+        ticker_items.append(f"► ep-{ep_fmt} reward={rwd:.3f} [{jur}] weak={axis}")
     if _groq_tokens > 0:
         ticker_items.append(f"► Groq {_groq_tokens:,} tokens consumed this session")
     st.markdown(
@@ -796,22 +838,23 @@ st.markdown('<p class="panel-header">🔴 Live Episode Feed (Last 8)</p>', unsaf
 
 feed_data = history[-8:][::-1]  # newest first
 for r in feed_data:
-    rwd   = r.get("final_reward", 0)
-    ep_n  = r.get("episode", "?")
-    task  = r.get("task_id", "?")[:22]
-    jur   = r.get("jurisdiction", "FAR")
-    diff  = r.get("difficulty", "?")
-    axis  = r.get("weakest_axis", "?")
-    delta = r.get("delta", 0)
+    rwd   = float(r.get("final_reward") or 0)
+    ep_n  = r.get("episode", 0)
+    ep_fmt = f"{int(ep_n):04d}" if isinstance(ep_n, (int, float)) else _safe_str(ep_n)
+    task  = _safe_str(r.get("task_id"), "?", maxlen=22)
+    jur   = _safe_str(r.get("jurisdiction"), "FAR")
+    diff  = _safe_str(r.get("difficulty"), "?")
+    axis  = _safe_str(r.get("weakest_axis"), "?")
+    delta = float(r.get("delta") or 0)
     shock = " ⚡shock" if r.get("shock_fired") else ""
     adv   = " 🦹adv" if r.get("adversarial") else ""
     bt    = " ★BT" if r.get("is_breakthrough") else ""
     cls   = "good" if rwd >= 0.70 else "mid" if rwd >= 0.45 else "bad"
     color = "#3fb950" if rwd >= 0.70 else "#e3b341" if rwd >= 0.45 else "#f85149"
-    ts    = r.get("timestamp", "")[:16].replace("T", " ")
+    ts    = _safe_str(r.get("timestamp"), "")[:16].replace("T", " ")
     st.markdown(f"""
     <div class="ep-card {cls}">
-      <span style="color:{color}; font-weight:700;">ep-{ep_n:04d}</span>
+      <span style="color:{color}; font-weight:700;">ep-{ep_fmt}</span>
       &nbsp; reward=<b style="color:{color}">{rwd:.3f}</b>
       &nbsp; Δ<span style="color:{'#3fb950' if delta>=0 else '#f85149'}">{delta:+.3f}</span>
       &nbsp;·&nbsp; {jur} · {diff} · weak=<code style="color:#8b949e">{axis}</code>

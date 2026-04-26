@@ -28,13 +28,14 @@ short_description: Self-improving multi-agent RL env for procurement
 ## 🚀 Live Environment
 
 **HF Space:** https://Flake56-crucible-env.hf.space  
-**Health check:** https://Flake56-crucible-env.hf.space/health
+**Health check:** https://Flake56-crucible-env.hf.space/health  
+**API Docs:** https://Flake56-crucible-env.hf.space/docs
 
-## 📺 Demo Video
-[Watch the 2-minute demo](YOUR_YOUTUBE_LINK)
+## 📺 Pitch Deck
+[6-slide pitch deck (90-second read)](https://huggingface.co/spaces/Flake56/crucible-env)
 
 ## 📝 Blog Post
-[Read the full writeup on Hugging Face](YOUR_HF_POST_LINK)
+[Read the full writeup](https://huggingface.co/Flake56)
 
 ---
 

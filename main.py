@@ -2,23 +2,24 @@
 CRUCIBLE — Main Entry Point
 
 Commands:
-  python main.py baseline      — Phase 1: measure base model performance on static tasks
-  python main.py train         — Phase 2: run 50 episodes with Unsloth/TRL GRPO (or simulation)
-  python main.py architect     — Phase 3: activate Architect curriculum, 30 episodes
-  python main.py adversarial   — Run adversarial red-team episode (Vendor vs Executor)
-  python main.py shock         — Run episode with regulation shock events enabled
-  python main.py eu            — Run episode on EU Procurement domain (Directive 2014/24/EU)
-  python main.py full          — Run complete pipeline: baseline + train + architect + adversarial
-  python main.py demo          — Run demo mode with failure injection
-  python main.py episode       — Run a single standard episode (quick test)
+  python main.py baseline      — Phase 1: 10 baseline episodes (no curriculum)
+  python main.py train         — Phase 2: 50 GRPO-style training episodes
+  python main.py architect     — Phase 3: 30 episodes with Architect curriculum
+  python main.py adversarial   — Adversarial red-team episode (Vendor crafts, Executor catches)
+  python main.py shock         — Episode with mid-run regulation shock injection
+  python main.py eu            — Episode on EU Procurement domain (Directive 2014/24/EU)
+  python main.py full          — Full pipeline: baseline → train → architect → adversarial + shock + eu + plots
+  python main.py demo          — Demo mode with pre-scripted failure injection
+  python main.py episode       — Single standard episode (quick ~30s test)
   python main.py regression    — Check for catastrophic forgetting vs baseline
-  python main.py plots         — Generate all plots and demo data
-  python main.py dashboard     — Launch Streamlit dashboard
+  python main.py plots         — Regenerate all plots from current episode logs
+  python main.py dashboard     — Launch Streamlit mission-control dashboard
 """
 
 import sys
 import subprocess
 import json
+import pathlib
 
 
 def run_baseline():
@@ -133,13 +134,23 @@ def run_regression():
 
 def run_plots():
     """Generate all plots and demo data. Commits-ready output under plots/."""
-    from scripts.generate_demo_data import main as gen_main
-    gen_main()
+    import importlib.util, pathlib
+    spec = importlib.util.spec_from_file_location(
+        "generate_demo_data",
+        pathlib.Path(__file__).parent / "scripts" / "generate_demo_data.py",
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod.main()
     print("Plots saved to plots/ directory.")
 
 
 def run_dashboard():
-    subprocess.run(["streamlit", "run", "demo/dashboard.py"])
+    root = str(pathlib.Path(__file__).parent)
+    subprocess.run(
+        ["streamlit", "run", str(pathlib.Path(root) / "demo" / "dashboard.py")],
+        cwd=root,
+    )
 
 
 def main():
