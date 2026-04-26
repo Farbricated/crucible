@@ -5,6 +5,7 @@ colorFrom: red
 colorTo: red
 sdk: gradio
 sdk_version: "4.44.0"
+python_version: "3.11"
 app_file: demo/gradio_app.py
 pinned: true
 ---
