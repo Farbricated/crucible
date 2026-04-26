@@ -5,8 +5,8 @@ huggingface_hub>=1.0.0
 anthropic>=0.40.0          # fallback if HF_TOKEN not set
 groq>=0.11.0               # primary LLM backend
 
-# Dashboard
-gradio>=5.0.0
+# Dashboard (must match HF Space sdk_version to avoid resolver conflicts)
+gradio==4.44.0
 plotly>=5.20.0
 pandas>=2.0.0
 matplotlib>=3.8.0
