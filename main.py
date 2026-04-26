@@ -16,10 +16,27 @@ Commands:
   python main.py dashboard     — Launch Streamlit mission-control dashboard
 """
 
+import os
 import sys
 import subprocess
 import json
 import pathlib
+
+
+def _load_dotenv():
+    """Load .env from the project root into os.environ (no extra dependencies)."""
+    env_path = pathlib.Path(__file__).parent / ".env"
+    if not env_path.exists():
+        return
+    for raw in env_path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = val
 
 
 def run_baseline():
@@ -175,6 +192,7 @@ def main():
         print(__doc__)
         sys.exit(1)
 
+    _load_dotenv()
     print(f"\nCRUCIBLE | Running: {cmd}\n")
     commands[cmd]()
 
