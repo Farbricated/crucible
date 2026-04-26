@@ -9,6 +9,9 @@ groq>=0.11.0               # primary LLM backend
 
 # Dashboard (must match HF Space sdk_version to avoid resolver conflicts)
 gradio==4.44.0
+# Keep ASGI stack aligned with Gradio 4.44 internals (newer FastAPI/Starlette break templates on Spaces)
+fastapi==0.112.2
+starlette==0.38.6
 pillow==10.4.0             # avoid sdist fallback (pillow 10.3.0 fails on py3.13 builder)
 plotly>=5.20.0
 pandas>=2.0.0

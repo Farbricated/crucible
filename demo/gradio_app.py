@@ -559,7 +559,9 @@ def make_app() -> gr.Blocks:
 
 def launch() -> None:
     app = make_app()
-    app.queue().launch(server_name="0.0.0.0", server_port=7860, inbrowser=False)
+    # On hosted runtimes (e.g. HF Spaces), localhost reachability checks can fail.
+    # share=True avoids startup abort while still binding the expected host/port.
+    app.queue().launch(server_name="0.0.0.0", server_port=7860, inbrowser=False, share=True)
 
 
 if __name__ == "__main__":
