@@ -1,0 +1,49 @@
+# CRUCIBLE — OpenEnv Hackathon 2026
+
+## Project
+Multi-agent RL environment for procurement compliance (AXIOM Corp).
+Stack: Python, FastAPI, OpenEnv v0.2.3, Groq API (dev) / HF Inference API (submission), Streamlit, Pydantic.
+Agents: Executor, Arbiter, Architect, Vendor + RegulationShock engine.
+
+## Hackathon submission non-negotiables
+- Use OpenEnv base classes: Environment or MCPEnvironment only
+- Respect client/server separation — clients never import server internals
+- Implement exactly: reset(), step(), state() — never use these as MCP tool names
+- Valid openenv.yaml manifest must exist
+- Training script must connect to live HF Space environment, not a static dataset
+- Push to HuggingFace Space via: openenv push --repo-id Flake56/crucible-env
+- README must link: HF Space URL, training notebook, blog post, plots
+- Plots committed as .png with axis labels — never left only in Colab or W&B
+
+## Judging weights (keep these in mind on every decision)
+- Environment Innovation: 40% — novel, adversarial, self-improving, multi-jurisdiction
+- Storytelling: 30% — dashboard, README, counterfactual consequences
+- Reward improvement: 20% — before/after curves, baseline comparison, +78% is your number
+- Pipeline quality: 10% — composable reward, GRPO-ready, token-aware rate limiting
+
+## LLM backend — TWO modes, never mix them up
+
+### DEV mode (local, uses Groq free tier)
+- Model: llama-3.1-8b-instant via groq SDK
+- Hard limit: 500K tokens/day free tier (your logs show you hit this at 18:00 and 22:00)
+- Real numbers from your logs: avg 1,209 input tokens, avg 381 output tokens, 58.2% success rate, 41.8% 429s
+- Rate limit type: TPD (tokens per day) — NOT TPM. Parse retry-after from error with: re.search(r"try again in ([\d.]+)([sm])", err)
+
+### SUBMISSION mode (HF Inference API, uses $30 HF credit per person)
+- Model: meta-llama/Llama-3.1-8B-Instruct via HF Inference API
+- Export: HF_TOKEN=hf_your_token
+- Budget: ~$30 per person, T4 GPU for training via hf jobs uv run --flavor t4-small
+
+## Groq rules (DEV mode only)
+- System prompts are STATIC strings — never f-string or .format() a system prompt
+- All dynamic content (scenario, task JSON, attempt) goes in the user turn only
+- max_tokens per agent: Arbiter=450, Executor=600, Architect=400, Vendor=500
+- Backoff: parse exact retry-after from 429 error message, wait that duration, max 5 retries
+- Daily budget guard: module-level counter, raise BudgetExhausted if remaining < requested
+
+## Code rules
+- Pydantic models for all Action/Observation/State
+- No FAR/DFARS clause text hardcoded in prompts — use CLAUSE_LOOKUP dict
+- Episode logs ? data/episode_logs/ as JSON
+- Plots ? plots/*.png with labeled axes, committed to repo
+- Return JSON only from all LLM calls — enforce with "Return JSON only." in every system prompt

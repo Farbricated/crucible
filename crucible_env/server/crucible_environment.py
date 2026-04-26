@@ -152,10 +152,8 @@ class CrucibleEnvironment(Environment):
         if score_2.world_state_delta:
             self.world.apply_delta(score_2.world_state_delta)
 
-        final_reward = compute_final_reward(score_2, score_1.weighted_total)
-        # Shock adaptation bonus
-        if self._active_shock and score_2.shock_adapted:
-            final_reward = round(min(1.0, final_reward + 0.05), 4)
+        shock_adapted = bool(self._active_shock and score_2.shock_adapted)
+        final_reward = compute_final_reward(score_2, score_1.weighted_total, shock_adapted=shock_adapted)
         score_2.final_reward = final_reward
 
         is_breakthrough = self._check_breakthrough(task, score_2.weighted_total)

@@ -129,10 +129,10 @@ class EpisodeRunner:
             print(f"\n[Vendor Score] Concealment rate: {vendor_score.concealment_rate:.2f} | Vendor reward: {vendor_score.vendor_reward:.3f}")
 
         # ── FINAL REWARD ────────────────────────────────────────
-        final_reward = arbiter.compute_final_reward(score_2, score_1.weighted_total)
-        # Shock adaptation bonus (+0.05 if executor correctly adapted)
-        if active_shock and score_2.shock_adapted:
-            final_reward = round(min(1.0, final_reward + 0.05), 4)
+        shock_adapted = bool(active_shock and score_2.shock_adapted)
+        final_reward = arbiter.compute_final_reward(
+            score_2, score_1.weighted_total, shock_adapted=shock_adapted
+        )
         score_2.final_reward = final_reward
 
         # ── BREAKTHROUGH CHECK ──────────────────────────────────

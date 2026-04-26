@@ -17,34 +17,15 @@ import uuid
 from core.schemas import TaskSpec, VendorAction, VendorScore, ArbiterScore
 from utils.llm_client import complete as llm_complete
 from utils.clauses import key_value, threshold, CLAUSE_REGISTRY
+from core.llm_client import call_llm
 
-VENDOR_SYSTEM_PROMPT = (
-    "You are the Vendor — an adversarial agent in CRUCIBLE, a procurement compliance training environment.\n\n"
-    "Your goal: craft a contract document that embeds FAR/DFARS/EU violations but makes them look legitimate "
-    "at first glance. NOT obviously fraudulent — violations a compliance analyst could easily miss.\n\n"
-    "CONCEALMENT TECHNIQUES:\n"
-    "1. Cite the correct clause number but apply it at the wrong threshold value\n"
-    "2. Include the required clause but in a neutered form that removes key protections\n"
-    "3. Reference an exception or waiver that does not actually apply\n"
-    "4. Correct language for one clause while hiding a violation in an adjacent clause\n"
-    "5. Bury a violation inside boilerplate that looks standard\n"
-    "6. Use vague language ('best efforts', 'commercially reasonable') to obscure a hard requirement\n"
-    "7. List a debarred vendor but reference an old clearance date that has since lapsed\n"
-    "8. State a percentage commitment that meets the letter but not the spirit\n"
-    "9. Include a 'see attached exhibit' reference for a key requirement but provide no exhibit\n"
-    "10. Use amendment/modification language to change a previously-compliant clause to non-compliant\n\n"
-    "JURISDICTIONS: FAR (US federal), DFARS (US defense), EU (Directive 2014/24/EU)\n\n"
-    'OUTPUT FORMAT — return ONLY valid JSON, no markdown:\n'
-    "{\n"
-    '  "crafted_contract": "full contract text with embedded hidden violations",\n'
-    '  "hidden_violations": ["specific violations embedded"],\n'
-    '  "concealment_techniques": ["technique used per violation"],\n'
-    '  "concealment_reasoning": "overall concealment strategy",\n'
-    '  "difficulty_target": "easy|medium|hard|expert",\n'
-    '  "jurisdiction": "FAR|DFARS|EU"\n'
-    "}\n\n"
-    "The contract must look professionally written. Return JSON only. No explanation."
-)
+VENDOR_SYSTEM = """Adversarial vendor. Write a contract that looks compliant but hides real violations.
+Concealment: correct FAR clause number with wrong threshold, list many clauses to obscure a missing one, vague language instead of required specific terms, expired registrations not flagged, verbal approval instead of required written consent.
+Return JSON only:
+{"contract_text":"...","hidden_violations":["..."],"concealment_techniques_used":["..."]}"""
+
+# Legacy alias
+VENDOR_SYSTEM_PROMPT = VENDOR_SYSTEM
 
 
 # Violation seeds reference CLAUSE_REGISTRY for all thresholds and rates.
@@ -182,7 +163,10 @@ ADDITIONAL GUIDANCE:
 Craft the adversarial contract now. Return strict JSON only."""
 
     try:
-        raw = llm_complete(VENDOR_SYSTEM_PROMPT, prompt, max_tokens=500)
+        try:
+            raw = call_llm([{"role": "user", "content": prompt}], agent="vendor", system=VENDOR_SYSTEM)
+        except Exception:
+            raw = llm_complete(VENDOR_SYSTEM_PROMPT, prompt, max_tokens=500)
         raw = re.sub(r"```json|```", "", raw).strip()
         data = json.loads(raw)
     except Exception:

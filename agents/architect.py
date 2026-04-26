@@ -4,35 +4,18 @@ import uuid
 from core.schemas import FailureRecord, ArchitectOutput, TaskSpec
 from utils.llm_client import complete as llm_complete
 from utils.clauses import key_value, threshold
+from core.llm_client import call_llm
 
 ALLOWED_DIFFICULTIES = {"easy", "medium", "hard", "expert"}
 
-ARCHITECT_SYSTEM_PROMPT = (
-    "You are the Architect for CRUCIBLE — a curriculum designer. "
-    "Generate the next training task for the Executor based on its failure history.\n\n"
-    "RULES:\n"
-    "1. Target the Executor's WEAKEST scoring axis.\n"
-    "2. Calibrate difficulty to land the Executor in the 0.45–0.70 scoring band (productive learning zone).\n"
-    "3. Below 0.20 = too hard (no learning signal). Above 0.90 = too easy (no learning signal).\n\n"
-    "ESCALATION TECHNIQUES:\n"
-    "- Hide violations inside legitimate-looking contract language\n"
-    "- Chain two regulatory frameworks that conflict\n"
-    "- Use correct clause numbers but wrong applicability thresholds\n"
-    "- Introduce a subtle OCI\n"
-    "- Add an undisclosed prior violation\n\n"
-    'OUTPUT FORMAT — return ONLY valid JSON, no markdown:\n'
-    "{\n"
-    '  "domain": "procurement",\n'
-    '  "difficulty": "easy|medium|hard|expert",\n'
-    '  "target_axis": "weakest axis being targeted",\n'
-    '  "scenario_context": "plain English task instruction for the Executor",\n'
-    '  "contract_text": "full contract/document text to analyze",\n'
-    '  "expected_score_range": [0.45, 0.70],\n'
-    '  "architect_reasoning": "why this task targets the weakness",\n'
-    '  "lineage_id": "failure_id that triggered this task"\n'
-    "}\n\n"
-    "Return JSON only. No explanation."
-)
+ARCHITECT_SYSTEM = """Generate the next compliance training task targeting the agent's weakest axis.
+Learning band target: 0.45-0.70. Score < 0.45 reduce difficulty. Score > 0.70 escalate.
+Escalation: hide violations in boilerplate, chain conflicting frameworks, correct clause number with wrong threshold, vendor with undisclosed prior violations.
+Return JSON only:
+{"task_id":"...","scenario":"...","difficulty":"easy|medium|hard|expert","target_axis":"...","jurisdiction":"FAR|DFARS|EU","violations_to_hide":["..."]}"""
+
+# Legacy alias
+ARCHITECT_SYSTEM_PROMPT = ARCHITECT_SYSTEM
 
 
 def _compute_axis_averages(failures: list[FailureRecord]) -> dict:
@@ -200,7 +183,10 @@ Lineage ID to reference: {lineage_id}
 
 Return strict JSON only. No prose. All required fields must be present."""
 
-    raw = llm_complete(ARCHITECT_SYSTEM_PROMPT, prompt, max_tokens=400)
+    try:
+        raw = call_llm([{"role": "user", "content": prompt}], agent="architect", system=ARCHITECT_SYSTEM)
+    except Exception:
+        raw = llm_complete(ARCHITECT_SYSTEM_PROMPT, prompt, max_tokens=400)
     raw = re.sub(r"```json|```", "", raw).strip()
 
     try:

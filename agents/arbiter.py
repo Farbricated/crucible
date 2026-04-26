@@ -2,6 +2,7 @@ import json
 import re
 from core.schemas import ExecutorAction, ArbiterScore, TaskSpec, RegulationShock
 from utils.llm_client import complete as llm_complete
+from core.llm_client import call_llm
 
 WEIGHTS = {
     "correctness": 0.35,
@@ -11,32 +12,14 @@ WEIGHTS = {
     "generalization_signal": 0.10,
 }
 
-ARBITER_SYSTEM_PROMPT = (
-    "You are the Arbiter for CRUCIBLE — a rigorous, frozen scoring agent. "
-    "You never adapt, never go easy, never change your standards.\n\n"
-    "Score the Executor response across 5 axes (each 0.0–1.0):\n"
-    "1. correctness — Is the core decision factually correct?\n"
-    "2. completeness — Did it identify ALL violations, not just some?\n"
-    "3. reasoning_transparency — Clear reasoning with specific regulation citations?\n"
-    "4. efficiency — Concise, well-structured, no padding?\n"
-    "5. generalization_signal — Understanding transferable to similar cases?\n\n"
-    "STRICT RULE: getting the classification right but citing no regulation = "
-    "0.7 correctness, 0.3 reasoning_transparency.\n\n"
-    'OUTPUT FORMAT — return ONLY valid JSON, no markdown:\n'
-    "{\n"
-    '  "correctness": 0.0-1.0,\n'
-    '  "completeness": 0.0-1.0,\n'
-    '  "reasoning_transparency": 0.0-1.0,\n'
-    '  "efficiency": 0.0-1.0,\n'
-    '  "generalization_signal": 0.0-1.0,\n'
-    '  "feedback": "what was right and what failed",\n'
-    '  "what_failed": "specific gap",\n'
-    '  "what_correct_looks_like": "what full-credit looks like",\n'
-    '  "consequence_if_approved": "one sentence: real-world consequence if this decision were enacted",\n'
-    '  "world_state_delta": {}\n'
-    "}\n\n"
-    "Return JSON only. No explanation."
-)
+ARBITER_SYSTEM = """Score a procurement compliance analysis on 5 axes.
+Weights: correctness=0.35, completeness=0.25, reasoning_transparency=0.20, efficiency=0.10, generalization_signal=0.10
+Each axis: float 0.0-1.0. Produce weighted_total and 1-sentence consequence_if_approved.
+Return JSON only:
+{"correctness":0.0,"completeness":0.0,"reasoning_transparency":0.0,"efficiency":0.0,"generalization_signal":0.0,"weighted_total":0.0,"consequence_if_approved":"..."}"""
+
+# Legacy alias kept for any code that still references the old name
+ARBITER_SYSTEM_PROMPT = ARBITER_SYSTEM
 
 
 def score(
@@ -74,7 +57,10 @@ Confidence: {action.confidence}
 
 Score this response across all 5 axes. Return JSON only."""
 
-    raw = llm_complete(ARBITER_SYSTEM_PROMPT, prompt, max_tokens=450)
+    try:
+        raw = call_llm([{"role": "user", "content": prompt}], agent="arbiter", system=ARBITER_SYSTEM)
+    except Exception:
+        raw = llm_complete(ARBITER_SYSTEM_PROMPT, prompt, max_tokens=450)
     raw = re.sub(r"```json|```", "", raw).strip()
 
     try:
@@ -127,12 +113,12 @@ Score this response across all 5 axes. Return JSON only."""
 def compute_final_reward(
     score_2: ArbiterScore,
     attempt_1_score: float,
+    shock_adapted: bool = False,
 ) -> float:
     base = score_2.weighted_total
 
     # Delta reward — learning from feedback
-    delta = (score_2.weighted_total - attempt_1_score) * 0.2
-    delta = min(delta, 0.15)
+    delta = min((score_2.weighted_total - attempt_1_score) * 0.20, 0.15)
 
     # World coherence bonus/penalty
     coherence = 0.10 if score_2.world_coherent else -0.10
@@ -144,7 +130,10 @@ def compute_final_reward(
         score_2.correctness == 0
     ) else 0.0
 
-    total = base + delta + coherence + malformed
+    # Regulation shock adaptation bonus
+    shock_bonus = 0.05 if shock_adapted else 0.0
+
+    total = base + delta + coherence + malformed + shock_bonus
     return round(max(0.0, min(1.0, total)), 4)
 
 

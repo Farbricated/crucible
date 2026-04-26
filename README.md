@@ -7,8 +7,8 @@
 | Artifact | Link |
 |---|---|
 | HuggingFace Space (live env) | [`spaces/Flake56/crucible-env`](https://huggingface.co/spaces/Flake56/crucible-env) · endpoint: [`Flake56-crucible-env.hf.space/health`](https://Flake56-crucible-env.hf.space/health) |
-| Training Notebook (Colab) | [`crucible_env/training/crucible_grpo.ipynb`](crucible_env/training/crucible_grpo.ipynb) · uses Unsloth + HF TRL GRPO |
-| Blog Writeup | [`BLOG.md`](BLOG.md) — also posted on [HuggingFace](https://huggingface.co/Flake56) |
+| Training Notebook | [`crucible_env/training/crucible_grpo.ipynb`](crucible_env/training/crucible_grpo.ipynb) · [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Flake56/crucible-env/blob/main/crucible_env/training/crucible_grpo.ipynb) |
+| Blog Writeup | [`BLOG.md`](BLOG.md) — also posted on [HuggingFace Blog](https://huggingface.co/blog/Flake56/crucible) |
 | Pitch Deck (6 slides, ~90 sec) | [`SLIDES.md`](SLIDES.md) |
 | OpenEnv Version | `openenv-core==0.2.3` (pinned in [`crucible_env/pyproject.toml`](crucible_env/pyproject.toml)) |
 

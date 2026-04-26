@@ -2,33 +2,16 @@ import json
 import re
 from core.schemas import TaskSpec, ExecutorAction
 from utils.llm_client import complete as llm_complete, active_backend
-from utils.clauses import build_executor_clause_block
+from core.llm_client import call_llm
 
-# ── System prompt ──────────────────────────────────────────────
-# Static string — never use f-strings here.
-# Clause details come from utils/clauses.py (single source of truth).
-# Computed once at module load from CLAUSE_REGISTRY; treated as a constant.
-_CLAUSE_BLOCK = build_executor_clause_block()
+EXECUTOR_SYSTEM = """Procurement compliance analyst at AXIOM Corp (aerospace/defense).
+Detect violations. Frameworks: FAR, DFARS, EU Directive 2014/24/EU.
+Violations: expired SAM.gov registration, undisclosed OCI, missing mandatory clauses, ITAR breach, defective cost pricing, debarred vendor, TINA threshold breach.
+Return JSON only:
+{"decision":"COMPLIANT|NON-COMPLIANT","violations_found":["FAR X.XXX - reason"],"reasoning":"...","confidence":0.0}"""
 
-EXECUTOR_SYSTEM_PROMPT = (
-    "You are the Executor for CRUCIBLE — a compliance analyst at AXIOM Corporation, "
-    "an aerospace and defense contractor with US and European operations.\n\n"
-    "Your job: analyze procurement documents for regulatory violations.\n\n"
-    "JURISDICTION NOTE: Apply FAR/DFARS rules for US contracts, EU Directive rules for EU contracts. "
-    "The contract header will specify the jurisdiction.\n"
-    + _CLAUSE_BLOCK
-    + "\n\n"
-    "OUTPUT FORMAT — return ONLY valid JSON, no markdown:\n"
-    "{\n"
-    '  "reasoning": "step by step analysis",\n'
-    '  "decision": "COMPLIANT or NON-COMPLIANT",\n'
-    '  "violations_found": ["specific violations with clause citations"],\n'
-    '  "supporting_evidence": ["key text passages supporting your decision"],\n'
-    '  "confidence": 0.0-1.0,\n'
-    '  "recommendation": "specific corrective action"\n'
-    "}\n\n"
-    "Return JSON only. No explanation."
-)
+# Legacy alias
+EXECUTOR_SYSTEM_PROMPT = EXECUTOR_SYSTEM
 
 
 def act(
@@ -47,7 +30,10 @@ def act(
     prompt += "Provide your analysis in the required JSON format."
 
     try:
-        raw = llm_complete(EXECUTOR_SYSTEM_PROMPT, prompt, max_tokens=600)
+        try:
+            raw = call_llm([{"role": "user", "content": prompt}], agent="executor", system=EXECUTOR_SYSTEM)
+        except Exception:
+            raw = llm_complete(EXECUTOR_SYSTEM_PROMPT, prompt, max_tokens=600)
         raw = re.sub(r"```json|```", "", raw).strip()
     except Exception as exc:
         return ExecutorAction(
