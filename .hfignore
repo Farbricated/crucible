@@ -1,0 +1,6 @@
+plots/
+data/
+*.log
+.env
+crucible_env/.venv/
+__pycache__/
