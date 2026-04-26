@@ -178,6 +178,7 @@ try:
     _is_groq      = _binfo.get("backend") == "groq"
     _active_label = _binfo.get("active", "Unknown")
 except Exception:
+    _binfo = {"groq_key_set": False, "backend": "unknown", "active": "Unknown"}
     _is_groq = False; _active_label = "Unknown"
     _groq_calls = _groq_tokens = _groq_rl = 0
     _groq_wait_s = _window_used = 0.0; _tpm_eff = 5100
@@ -476,7 +477,10 @@ with g2:
         fig6.update_layout(
             paper_bgcolor="#161b22", plot_bgcolor="#0d1117",
             font=dict(color="#c9d1d9", size=11),
-            coloraxis_colorbar=dict(tickfont=dict(color="#c9d1d9"), titlefont=dict(color="#c9d1d9")),
+            coloraxis_colorbar=dict(
+                tickfont=dict(color="#c9d1d9"),
+                title=dict(text="Fail Rate", font=dict(color="#c9d1d9")),
+            ),
             margin=dict(t=10, b=10, l=10, r=10), height=220,
         )
         st.plotly_chart(fig6, use_container_width=True)

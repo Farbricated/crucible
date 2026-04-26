@@ -6,12 +6,10 @@
 
 | Artifact | Link |
 |---|---|
-| HuggingFace Space (Environment URL) | [`https://huggingface.co/spaces/Flake56/crucible-env`](https://huggingface.co/spaces/Flake56/crucible-env) · live endpoint: [`Flake56-crucible-env.hf.space`](https://Flake56-crucible-env.hf.space) |
-| Training Notebook (Colab-ready) | [`crucible_env/training/crucible_grpo.ipynb`](crucible_env/training/crucible_grpo.ipynb) |
-| Blog Writeup | [`BLOG.md`](BLOG.md) |
-| W&B Run | *(attach after first real GRPO run — logging hooks in [`training/grpo_loop.py`](training/grpo_loop.py))* |
-| Demo Video (≤2 min) | *(pending upload — optional, slides provided)* |
-| Pitch Deck (6 slides, ~90 sec read) | [`SLIDES.md`](SLIDES.md) |
+| HuggingFace Space (live env) | [`spaces/Flake56/crucible-env`](https://huggingface.co/spaces/Flake56/crucible-env) · endpoint: [`Flake56-crucible-env.hf.space/health`](https://Flake56-crucible-env.hf.space/health) |
+| Training Notebook (Colab) | [`crucible_env/training/crucible_grpo.ipynb`](crucible_env/training/crucible_grpo.ipynb) · uses Unsloth + HF TRL GRPO |
+| Blog Writeup | [`BLOG.md`](BLOG.md) — also posted on [HuggingFace](https://huggingface.co/Flake56) |
+| Pitch Deck (6 slides, ~90 sec) | [`SLIDES.md`](SLIDES.md) |
 | OpenEnv Version | `openenv-core==0.2.3` (pinned in [`crucible_env/pyproject.toml`](crucible_env/pyproject.toml)) |
 
 ## Quick Reviewer Guide (3-min read)
