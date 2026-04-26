@@ -1,7 +1,7 @@
 ---
 title: Crucible Env
 emoji: 🔥
-colorFrom: orange
+colorFrom: red
 colorTo: red
 sdk: gradio
 sdk_version: "4.44.0"
