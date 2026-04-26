@@ -1,15 +1,15 @@
 ---
 title: Crucible Env
 emoji: 🔥
-colorFrom: orange
-colorTo: red
+colorFrom: red
+colorTo: yellow
 sdk: gradio
-sdk_version: "4.44.0"
+sdk_version: "5.9.1"
 app_file: demo/gradio_app.py
 pinned: true
 ---
 
-> **🔥 Live Space:** https://huggingface.co/spaces/Flake56/crucible-env
+> **🔥 Live Space:** https://huggingface.co/spaces/Flake56/crucible-env | **GitHub:** https://github.com/Farbricated/crucible | **Notebook:** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/Farbricated/crucible/blob/main/crucible_env/training/crucible_grpo.ipynb)
 
 # CRUCIBLE — Self-Improving Multi-Agent RL for Procurement Compliance
 

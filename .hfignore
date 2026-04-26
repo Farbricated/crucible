@@ -1,6 +1,12 @@
 plots/
+*.png
+*.jpg
+*.jpeg
 data/
 *.log
 .env
 crucible_env/.venv/
 __pycache__/
+*.pyc
+uv.lock
+crucible_env/uv.lock

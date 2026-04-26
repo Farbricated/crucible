@@ -6,7 +6,7 @@ anthropic>=0.40.0          # fallback if HF_TOKEN not set
 groq>=0.11.0               # primary LLM backend
 
 # Dashboard
-gradio>=4.44.0
+gradio>=5.0.0
 plotly>=5.20.0
 pandas>=2.0.0
 matplotlib>=3.8.0

@@ -241,7 +241,7 @@ def make_app() -> gr.Blocks:
 
 def launch() -> None:
     app = make_app()
-    app.queue().launch(server_name="127.0.0.1", server_port=7860, inbrowser=True)
+    app.queue().launch(server_name="0.0.0.0", server_port=7860, inbrowser=False)
 
 
 if __name__ == "__main__":
